@@ -179,3 +179,12 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# added
+ats_suite/Expiremental Data/
+ats_suite/Calibration Files/
+ats_suite/trash_clone.py
+ats_suite/LVDT_calibration_log.csv
+ats_suite/IP_calibration_log.csv
+ats_suite/PT_calibration_log.csv
+ats_suite/frame_compliance_log.csv
