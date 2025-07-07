@@ -9,6 +9,10 @@ import matplotlib.pyplot as plt
 from subprocess import check_output
 from simple_pid import PID
 from datetime import datetime
+from solver import *
+from scipy.signal import savgol_filter
+from sklearn.linear_model import LinearRegression
+import shutil
 bus = smbus3.SMBus(1) #creates an object to communicate over i2c with smbus
 
 
@@ -18,20 +22,18 @@ bus = smbus3.SMBus(1) #creates an object to communicate over i2c with smbus
 -allow user to toggle on and off measuring temperatures (will increase speed)
 -load rate is not accurate
 
+KNOWN PROBLEMS
+- frame compliance log will always save one directory higher, it needs to always be saved in the original directory no matter what
 
 
 '''
 
-
 class ADC(): #ADS1115 Chip
 
-    '''ADC Class serves to provide methods for configuring and reading data from the ADC
-    ADC was measured to read up to ~960 SPS using function generator, 860 is advertised
-    '''
-
-
     def __init__(self):
-        
+        self.refresh()
+
+    def refresh(self):
         self.address = 0x48
 
     def config(self,device):
@@ -40,11 +42,14 @@ class ADC(): #ADS1115 Chip
         if device=='LVDT':
             config = [0b00000000,0b11100011] # see pg 18 of ADS1115 data sheet to change configuration. This configuration is set to standard operation, continuous conversion, 860SPS, AIN0 = +, AIN1 = - (differential)
         elif device=="pressure_transducer":
-            config = [0b01100000,0b11100011] # see pg 18 of ADS1115 data sheet to change configuration. This configuration is set to standard operation, continuous conversion, 860SPS, AIN2 = +, AIN3 = - (differential)
+            #config = [0b01100000,0b11100011] # see pg 18 of ADS1115 data sheet to change configuration. This configuration is set to standard operation, continuous conversion, 860SPS, AIN2 = +, AIN3 = - (differential)
+            config = [0b01100000,0b11100011] # config for strain measurement, changes differential to single ended input
+        elif device=="extensometer":
+            config = [0b01110000,0b11100011]
         else:
             print("ERROR: ADC input device not recognized...")
         bus.write_i2c_block_data(self.address,config_register,config) # write configuration to configuration register
-        time.sleep(1/525) # wait for configuration to activate
+        time.sleep(1/520) # wait for configuration to activate
 
 
     def readVoltage(self,device):
@@ -67,7 +72,9 @@ class DAC():
     ''' Need to add a calibration function at a later point.'''
 
     def __init__(self,log_callback,status_callback):
+        self.refresh(log_callback,status_callback)
 
+    def refresh(self,log_callback,status_callback):
         self.address = 0x60 ## sets address attribute for DAC
         self.funPT = PT(log_callback=log_callback,
                         status_callback=status_callback,
@@ -202,7 +209,9 @@ class PT():
     ''' Need to add a calibration function at a later point.'''
 
     def __init__(self,log_callback,status_callback,current_pressure_callback,current_force_callback):
+        self.refresh(log_callback,status_callback,current_pressure_callback,current_force_callback)
 
+    def refresh(self,log_callback,status_callback,current_pressure_callback,current_force_callback):
         self.funADC = ADC() # instantiate ADC class
         self.log = log_callback # define log attribute
         self.status = status_callback # define status attribute
@@ -280,13 +289,12 @@ class PT():
             pressure = (self.funADC.readRaw(device='pressure_transducer')*self.slope + self.zero) # measure pressure        
         except AttributeError:
             self.log('MEASUREMENT ERROR: No calibration data available, please calibrate and try again...')
+        force = (26.79*pressure)
         if callback==False:
             pass
         elif callback==True:
-            self.current_pressure(pressure) # log current pressure
-            self.log("Pressure measurement recorded...") # log measurement recorded
-        self.force = (26.79*pressure)
-        return float("%.2f" % self.force)
+            self.current_force(force) # log current pressure
+        return float("%.2f" % force)
 
 class TCamp():
 
@@ -329,12 +337,16 @@ class TCamp():
         
 class LVDT():
 
-    def __init__(self,log_callback,status_callback,current_position_callback):
+    def __init__(self,log_callback,status_callback,current_position_callback,current_voltage_callback):
+        self.refresh(log_callback,status_callback,current_position_callback,current_voltage_callback)
+
+    def refresh(self,log_callback,status_callback,current_position_callback,current_voltage_callback):
         #live_plot_callback
         self.funADC = ADC() #initializes function instance of ADC class
         self.log = log_callback # create log attribute
         self.status = status_callback # create status attribute
         self.current_position = current_position_callback
+        self.current_voltage = current_voltage_callback
         if os.path.exists('LVDT_calibration_log.csv'):
             df = pd.read_csv('LVDT_calibration_log.csv')
             self.slope = df['slope'].to_numpy()[-1] # convert slope to numpy array, use last value
@@ -403,10 +415,22 @@ class LVDT():
             except AttributeError:
                 self.log('MEASUREMENT ERROR: No calibration data available, please calibrate and try again...')
         return float("%.8f" % position) # View later to determine required number of decimals
+    
+    def measure_voltage(self,callback=False):
+        # measure ADC voltage for LVDT - avoids needing a callback on ADC
+        voltage = self.funADC.readVoltage(device='LVDT') # measure LVDT voltage
+        if callback==False:
+            pass
+        elif callback==True:
+            self.current_voltage(voltage) # callback current voltage reading
+        return voltage
 
 class MUX():
 
     def __init__(self):
+        self.refresh()
+
+    def refresh(self):
         ''' default address is 0x70'''
         self.address = 0x70
         self.open_channels # open channels on startup
@@ -595,15 +619,17 @@ class furnace_control():
 class DAQ():
 
     def __init__(self,file_path,log_data_save_callback=False):
+        self.refresh(file_path,log_data_save_callback)
 
+    def refresh(self,file_path,log_data_save_callback):
         self.file_path = file_path # define file path variable
         self.log_data_save = log_data_save_callback # define log data save variable
         
-    def save(self,force,pressure,position,setpoint,control,temp1,temp2,temp3,temp4,time_):
+    def save(self,force,pressure,displacement,setpoint,control,temp1,temp2,temp3,temp4,time_):
         for i in range(len(force)):
             force[i] = float("%.2f" % force[i])
             pressure[i] = float("%.2f" % pressure[i])
-            position[i] = float("%.5f" % position[i])
+            displacement[i] = float("%.5f" % displacement[i])
             setpoint[i] = float("%.5f" % setpoint[i])
             control[i] = float("%.2f" % control[i])
             temp1[i] = float("%.5f" % temp1[i])
@@ -614,7 +640,7 @@ class DAQ():
 
         df = pd.DataFrame({'force':    force,
                            'pressure': pressure,
-                           'position': position,
+                           'displacement': displacement,
                            'setpoint': setpoint,
                            'control':  control,
                            'temp1':    temp1,
@@ -625,33 +651,39 @@ class DAQ():
         write_header = not os.path.exists(self.file_path) # do not write header if it already exists
         df.to_csv(self.file_path,mode='a',index=False,header=write_header) # append/write data to file
 
-
 class test():
 
     def __init__(self,log_callback,test_status_callback):
+        self.refresh(log_callback,test_status_callback) # run on_start method
+
+    def refresh(self,log_callback,test_status_callback):
         # ===== Instantiate Classes =====
-        self.funDAC = DAC(log_callback=None,
+        self.funDAC = DAC(log_callback=log_callback,
                           status_callback=None) #creates instance of DAC class internal to "test" function
         self.funADC = ADC() #creates instance of ADC class internal to "test" function
-        self.funPT = PT(log_callback=None,
+        self.funPT = PT(log_callback=log_callback,
                         status_callback=None,
                         current_pressure_callback=None,
                         current_force_callback=None) #creates instance of PT class internal to "test" function
-        self.funLVDT = LVDT(log_callback=None,
+        self.funLVDT = LVDT(log_callback=log_callback,
                             status_callback=None,
-                            current_position_callback=None) #creates instance of LVDT class internal to "test" function
+                            current_position_callback=None,
+                            current_voltage_callback=None) #creates instance of LVDT class internal to "test" function
         self.funTCamp = TCamp() # creates instance of TC amp class internal to "test" function
         # ----- Callbacks -----
         self.log = log_callback # define log variable
         self.test_status = test_status_callback # define test status variable
         # ===== Instantiate Test Variables =====
+        self.stop_event = False # define stop event
+        self.is_FC_running = False # define attribute to determine if frame compliance is running
+        self.base_dir = os.getcwd() # get base directory
         self.buffer_size = 100 #buffer size in number of array elements
         self.setpoint_array = np.zeros(self.buffer_size)
         self.control_array = np.zeros(self.buffer_size)
         self.control_array_load = np.zeros(self.buffer_size)
         self.pressure_data = np.zeros(self.buffer_size)
         self.force_data = np.zeros(self.buffer_size)
-        self.position_data = np.zeros(self.buffer_size)
+        self.displacement_data = np.zeros(self.buffer_size)
         self.strain_data = np.zeros(self.buffer_size)
         self.temp1 = np.zeros(self.buffer_size)
         self.temp2 = np.zeros(self.buffer_size)
@@ -660,44 +692,80 @@ class test():
         self.time_array = np.zeros(self.buffer_size)
         self.LVDTresolution = 10/(2**15) # 10v/15-bit system (resolution in volts)
 
-    def MODcheck(self,maxload,load_rate,file_path):
-        funDAQ = DAQ(file_path=file_path,log_data_save_callback=None)
+    def stop_test(self):
+        self.stop_event = True # trigger stop event
+        self.log("Stopping Test...")
 
+    def frame_compliance(self,file_path,maxload,num_tests):
+        self.is_FC_running = True # define attribute to determine if frame compliance is running
+        base_name = os.path.basename(file_path) # get file names base name (without directory)
+        os.chdir(os.path.dirname(file_path)) # change diretory to file path directory
+        os.makedirs(base_name) # create a folder with the file name of file_path basename
+        self.log("Compliance testing started...")
+        # ===== Run Compliance Tests =====
+        for i in range(num_tests):
+            if self.stop_event==False:
+                self.funDAC.writePSI(3) # set pressure to minimum
+                time.sleep(3) # allow presure to equalize
+                self.MODcheck(file_path=os.path.join(base_name,f"FC_test_{i}.csv"),
+                            maxload=maxload,
+                            load_rate=40,
+                            status_callback='calibration')
+            if self.stop_event==True: # if test is stopped
+                self.funDAC.writePSI(3) # set pressure to minimum
+                self.stop_event = False # reset stop event
+                shutil.rmtree(file_path) # delete partially filled folder
+                return
+        # ===== Calculate Linear Fit =====
+        force = np.array([]) # create empty numpy array
+        displacement = np.array([]) # create empty numpy array
+        os.chdir(base_name) # enter into base_name directory where test files are stored
+        for i in range(num_tests):
+            df = pd.read_csv(f'FC_test_{i}.csv')
+            force = np.append(force,df['force'].to_numpy()) # append force values
+            displacement = np.append(displacement,df['displacement'].to_numpy()) # append displacement values
+        linear_fit = np.polyfit(y=displacement,x=force,deg=1) # generate force vs. displacement function
+        # ===== Aggregate Data =====
+        df = pd.DataFrame({'force':force,'displacement':displacement}) # create data frame with aggregate force and displacement values
+        write_header = not os.path.exists('FC_test_aggregate.csv') # check to see if the file exists, if so, define as false
+        df.to_csv('FC_test_aggregate.csv',mode='a',header=write_header,index=False) # append data frame to csv
+        self.log("Compliance test complete...")
 
+    def MODcheck(self,maxload,load_rate,file_path,status_callback="default"):
+        funDAQ = DAQ(file_path=file_path,log_data_save_callback=None) # instantiate DAQ class
         # ===== Calculate Number of Data Points To Be Collected ======
-        n = 0 # counter
+        n = 0 # loop counter
         step_size_psi = .01 # set step size in psi
-        piston_area = 26.79 # define the area of the piston
+        piston_area = 26.79 # define the area of the piston for force calculation
         max_pressure = 2*(maxload/piston_area) # maximum load divided by the piston area - multiplied by two for setpoint array buffer
         min_pressure = 3 # define minimum pressure
-        min_load = min_pressure*piston_area # cacluate minimum load
         num_points =  round((max_pressure-min_pressure)/(2*step_size_psi))# calculate the total number of points to be collected (pressure range/step size) - divide by 2 to keep step size the same given the buffer
         pressure_setpoint_array = np.linspace(3,max_pressure,num_points) # pressure setpoint array from min to max load in PSI
         total_test_time = maxload/load_rate # calculate total test time in seconds
         time_interval = total_test_time/num_points # calculate expected time interval
         start_time = time.time() # get start time
-        
         while True:
             for i in range(self.buffer_size):
                 current_time = time.time() # get current time
                 # ===== Read Data =====
                 self.pressure_data[i] = self.funPT.readPSI(callback=False) # get current pressure
                 self.force_data[i] = self.pressure_data[i]*piston_area # pressure*area=force
-                self.position_data[i] = self.funLVDT.measure(callback=False) # get current position
+                self.displacement_data[i] = self.funLVDT.measure(callback=False) # get current displacement
                 temperature = self.funTCamp.measure() # measure all four temperatures
-                self.temp1[i] = temperature[0] # assign temp 1
+                self.strain_data[i] = self.funADC.readVoltage(device='extensometer')
+                #self.temp1[i] = temperature[0] # assign temp 1
                 self.temp2[i] = temperature[1] # assign temp 2
                 self.temp3[i] = temperature[2] # assign temp 3
                 self.temp4[i] = temperature[3] # assign temp 4
                 self.time_array[i] = current_time-start_time # assign time elapsed
                 self.funDAC.writePSI(pressure_setpoint_array[i+(self.buffer_size*n)]) # write pressure accounting for loop itterations
                 # ===== End Test If Max Load Is Reached =====
-                if self.force_data[i]>=maxload: # if maxload is reached, end test
+                if self.force_data[i]>=maxload or self.stop_event==True: # if maxload is reached or stop event is triggered, end test
                     self.funDAC.writePSI(3)
                     # assign empty variables with length of current array - AVOIDS SAVING DATA WITH UNFILLED ZEROS
                     temp_force = np.zeros(i) 
                     temp_pressure = np.zeros(i)
-                    temp_position = np.zeros(i)
+                    temp_displacement = np.zeros(i)
                     temp_setpoint_array = np.zeros(i)
                     temp_control_array = np.zeros(i)
                     temp_temp1 = np.zeros(i)
@@ -708,17 +776,18 @@ class test():
                     for j in range(i):# ensures remaining data outside buffer is saved
                         temp_force[j] = self.force_data[j] 
                         temp_pressure[j] = self.pressure_data[j]
-                        temp_position[j] = self.position_data[j]
+                        temp_displacement[j] = self.displacement_data[j]
                         temp_setpoint_array[j] = pressure_setpoint_array[j]
                         temp_control_array[j] = pressure_setpoint_array[j]
-                        temp_temp1[j] = self.temp1[j]
+                        #temp_temp1[j] = self.temp1[j]
+                        temp_temp1[j] = self.strain_data[j]
                         temp_temp2[j] = self.temp2[j]
                         temp_temp3[j] = self.temp3[j]
                         temp_temp4[j] = self.temp4[j]
                         temp_time[j] = self.time_array[j]
                     funDAQ.save(force = temp_force,
                                 pressure = temp_pressure,
-                                position = temp_position,
+                                displacement = temp_displacement,
                                 setpoint = temp_setpoint_array,
                                 control = temp_control_array,
                                 temp1 = temp_temp1,
@@ -727,7 +796,16 @@ class test():
                                 temp4 = temp_temp4,
                                 time_ = temp_time)
                     self.log("Modulus Check Complete...")
-                    self.test_status('MODcheck',True) # test is complete
+                    if status_callback=='default':
+                        self.test_status('MODcheck','default-True') # test is complete - plot on pre-test tab
+                    elif status_callback=='calibration':
+                        self.test_status('MODcheck','calibration-True') # test is complete - plot on calibration tab
+                    elif status_callback=='None':
+                        pass
+                    # if self.is_FC_running==True:
+                    #     pass # stop event is reset inside frame compliance method
+                    # else:
+                    #     self.stop_event = False # reset stop event
                     return # break out of the function while keeping GUI running
                 else:
                     pass
@@ -740,22 +818,205 @@ class test():
                     else:
                         pass
             # ===== End of For Loop - Save Data =====
-            n += 1 # add to counter - counting loops
+            n += 1 # increase loop counter
             funDAQ.save(force = self.force_data,
                         pressure = self.pressure_data,
-                        position = self.position_data,
+                        displacement = self.displacement_data,
                         setpoint = pressure_setpoint_array[-self.buffer_size:],
                         control = pressure_setpoint_array[-self.buffer_size:],
+                        #temp1 = self.temp1,
+                        temp1 = self.strain_data,
+                        temp2 = self.temp2,
+                        temp3 = self.temp3,
+                        temp4 = self.temp4,
+                        time_ = self.time_array)
+            if status_callback=='default':
+                self.test_status('MODcheck','default-updated') # test status is 'updated' - data saved - plot on pre-test tab
+            elif status_callback=='calibration':
+                self.test_status('MODcheck','calibration-updated') # test status is 'updated' - data saved - plot on calibration tab
+            elif status_callback==None:
+                pass
+
+    def tensile(self,kp,stroke_rate,file_path,status_callback='default'):
+        funDAQ = DAQ(file_path=file_path,log_data_save_callback=None) # instantiate DAQ class
+        stroke_rate = .03 # in/min stroke control
+        piston_area = 26.79 # define the area of the piston for force calculation
+        ki=0;kd=0;setpoint=0
+        pid = PID(kp,ki,kd,setpoint)#PID controller with constants and setpoint
+        pid.output_limits = (3,98) #sets limit on output of PID
+        start_time = time.time() # get start time
+        while True:
+            for i in range(self.buffer_size):
+                current_time = time.time() # get current time
+                # ===== Read Data =====
+                self.pressure_data[i] = self.funPT.readPSI(callback=False) # get current pressure
+                self.force_data[i] = self.pressure_data[i]*piston_area # pressure*area=force
+                self.displacement_data[i] = self.funLVDT.measure(callback=False) # measure displacement
+                temperature = self.funTCamp.measure() # measure all four temperatures
+                self.strain_data[i] = self.funADC.readVoltage(device='extensometer')
+                #self.temp1[i] = temperature[0] # assign temp 1
+                self.temp2[i] = temperature[1] # assign temp 2
+                self.temp3[i] = temperature[2] # assign temp 3
+                self.temp4[i] = temperature[3] # assign temp 4
+                self.time_array[i] = current_time-start_time # measure elapsed time
+                setpoint = stroke_rate*self.time_array[i]*(1/60)
+                pid.setpoint = setpoint # update PID controller setpoint
+                self.setpoint_array[i] = setpoint # assign setpoint to data array
+                self.control_array[i] = pid(self.displacement_data[i]) # assign control value to data array
+                self.control_array_load[i] = self.control_array[i]*26.79 # convert control in psi to force (lbs)
+                self.funDAC.writePSI(self.control_array[i]) # write the control pressure
+                # ===== End Test If Max Load Is Reached =====
+                # ----- Stop Condition -----
+                # if self.force_data[-5]-self.force_data[i]>=100
+                if self.force_data[i]<=50 or self.stop_event==True: # stops test when load is less than 50lb (minimum cylinder load ~80lb) or stop test button is pressed
+                    self.funDAC.writePSI(3)
+                    # assign empty variables with length of current array - AVOIDS SAVING DATA WITH UNFILLED ZEROS
+                    temp_force = np.zeros(i) 
+                    temp_pressure = np.zeros(i)
+                    temp_displacement = np.zeros(i)
+                    temp_setpoint_array = np.zeros(i)
+                    temp_control_array = np.zeros(i)
+                    temp_temp1 = np.zeros(i)
+                    temp_temp2 = np.zeros(i)
+                    temp_temp3 = np.zeros(i)
+                    temp_temp4 = np.zeros(i)
+                    temp_time = np.zeros(i)
+                    for j in range(i):# ensures remaining data outside buffer is saved
+                        temp_force[j] = self.force_data[j] 
+                        temp_pressure[j] = self.pressure_data[j]
+                        temp_displacement[j] = self.displacement_data[j]
+                        temp_setpoint_array[j] = self.setpoint_array[j]
+                        temp_control_array[j] = self.control_array[j]
+                        #temp_temp1[j] = self.temp1[j]
+                        temp_temp1[j] = self.strain_data[j]
+                        temp_temp2[j] = self.temp2[j]
+                        temp_temp3[j] = self.temp3[j]
+                        temp_temp4[j] = self.temp4[j]
+                        temp_time[j] = self.time_array[j]
+                    funDAQ.save(force = temp_force,
+                                pressure = temp_pressure,
+                                displacement = temp_displacement,
+                                setpoint = temp_setpoint_array,
+                                control = temp_control_array,
+                                temp1 = temp_temp1,
+                                temp2 = temp_temp2,
+                                temp3 = temp_temp3,
+                                temp4 = temp_temp4,
+                                time_ = temp_time)
+                    self.log("Tensile Test Complete...")
+                    if status_callback=='default':
+                        self.test_status('tensile','default-True') # test is complete - plot on pre-test tab
+                    elif status_callback=='None':
+                        pass
+                    return # break out of the function while keeping GUI running
+                else:
+                    pass
+            # ===== End of For Loop - Save Data =====
+            funDAQ.save(force = self.force_data,
+                        pressure = self.pressure_data,
+                        displacement = self.displacement_data,
+                        setpoint = self.setpoint_array,
+                        control = self.control_array,
+                        #temp1 = self.temp1,
+                        temp1 = self.strain_data,
+                        temp2 = self.temp2,
+                        temp3 = self.temp3,
+                        temp4 = self.temp4,
+                        time_ = self.time_array)
+            if status_callback=='default':
+                self.test_status('tensile','default-updated') # test status is 'updated' - data saved - plot on pre-test tab
+            elif status_callback==None:
+                pass
+
+    def PIDtuning(self,kp,stroke_rate,max_load,file_path,status_callback='default'):
+        funDAQ = DAQ(file_path=file_path,log_data_save_callback=None) # instantiate DAQ class
+        stroke_rate = .03 # in/min stroke control
+        piston_area = 26.79 # define the area of the piston for force calculation
+        ki=0;kd=0;setpoint=0
+        pid = PID(kp,ki,kd,setpoint)#PID controller with constants and setpoint
+        pid.output_limits = (3,98) #sets limit on output of PID
+        start_time = time.time() # get start time
+        while True:
+            for i in range(self.buffer_size):
+                current_time = time.time() # get current time
+                # ===== Read Data =====
+                self.pressure_data[i] = self.funPT.readPSI(callback=False) # get current pressure
+                self.force_data[i] = self.pressure_data[i]*piston_area # pressure*area=force
+                self.displacement_data[i] = self.funLVDT.measure(callback=False) # measure displacement
+                temperature = self.funTCamp.measure() # measure all four temperatures
+                self.temp1[i] = temperature[0] # assign temp 1
+                self.temp2[i] = temperature[1] # assign temp 2
+                self.temp3[i] = temperature[2] # assign temp 3
+                self.temp4[i] = temperature[3] # assign temp 4
+                self.time_array[i] = current_time-start_time # measure elapsed time
+                setpoint = stroke_rate*self.time_array[i]*(1/60)
+                pid.setpoint = setpoint # update PID controller setpoint
+                self.setpoint_array[i] = setpoint # assign setpoint to data array
+                self.control_array[i] = pid(self.displacement_data[i]) # assign control value to data array
+                self.control_array_load[i] = self.control_array[i]*26.79 # convert control in psi to force (lbs)
+                self.funDAC.writePSI(self.control_array[i]) # write the control pressure
+                # ===== End Test If Max Load Is Reached =====
+                if self.force_data[i]>=max_load or self.stop_event==True: # stops test when max load is reached orstop test button is pressed
+                    self.funDAC.writePSI(3)
+                    # assign empty variables with length of current array - AVOIDS SAVING DATA WITH UNFILLED ZEROS
+                    temp_force = np.zeros(i) 
+                    temp_pressure = np.zeros(i)
+                    temp_displacement = np.zeros(i)
+                    temp_setpoint_array = np.zeros(i)
+                    temp_control_array = np.zeros(i)
+                    temp_temp1 = np.zeros(i)
+                    temp_temp2 = np.zeros(i)
+                    temp_temp3 = np.zeros(i)
+                    temp_temp4 = np.zeros(i)
+                    temp_time = np.zeros(i)
+                    for j in range(i):# ensures remaining data outside buffer is saved
+                        temp_force[j] = self.force_data[j] 
+                        temp_pressure[j] = self.pressure_data[j]
+                        temp_displacement[j] = self.displacement_data[j]
+                        temp_setpoint_array[j] = self.setpoint_array[j]
+                        temp_control_array[j] = self.control_array[j]
+                        temp_temp1[j] = self.temp1[j]
+                        temp_temp2[j] = self.temp2[j]
+                        temp_temp3[j] = self.temp3[j]
+                        temp_temp4[j] = self.temp4[j]
+                        temp_time[j] = self.time_array[j]
+                    funDAQ.save(force = temp_force,
+                                pressure = temp_pressure,
+                                displacement = temp_displacement,
+                                setpoint = temp_setpoint_array,
+                                control = temp_control_array,
+                                temp1 = temp_temp1,
+                                temp2 = temp_temp2,
+                                temp3 = temp_temp3,
+                                temp4 = temp_temp4,
+                                time_ = temp_time)
+                    self.log("Tuning Test Complete...")
+                    measured_stroke_rate = round(np.polyfit(self.time_array,self.displacement_data,deg=1)[0]*60,5) # get measured stroke rate
+                    self.log(f"Measured Stroke Rate (in/min): {measured_stroke_rate}")
+                    if status_callback=='default':
+                        self.test_status('tuning','default-True') # test is complete - plot on pre-test tab
+                    elif status_callback=='None':
+                        pass
+                    return # break out of the function while keeping GUI running
+                else:
+                    pass
+            # ===== End of For Loop - Save Data =====
+            funDAQ.save(force = self.force_data,
+                        pressure = self.pressure_data,
+                        displacement = self.displacement_data,
+                        setpoint = self.setpoint_array,
+                        control = self.control_array,
                         temp1 = self.temp1,
                         temp2 = self.temp2,
                         temp3 = self.temp3,
                         temp4 = self.temp4,
                         time_ = self.time_array)
-            self.test_status('MODcheck','updated') # test status is 'updated' - data saved
+            if status_callback=='default':
+                self.test_status('tuning','default-updated') # test status is 'updated' - data saved - plot on pre-test tab
+            elif status_callback==None:
+                pass
 
     def load_control(self,file_name=None):
-
-
         kp = 2000; ki = 0; kd = 0; n = 0 # ORIGINAL TEST CONDUCTED AT KP = 8000; KI = 1000
         load_rate = .03 # lbs/min load control
         if input(f"Test Conditions: Method: LOAD CONTROL, Rate: {load_rate} lbf/min" + "\n" + "Is this correct? Type YES to conintue, Press any other button to cancel ").upper().strip()=="YES":
@@ -767,7 +1028,7 @@ class test():
         funDAQ = DAQ(inp)
         force_data = self.force_data
         pressure_data = self.pressure_data
-        position_data = self.position_data
+        displacement_data = self.displacement_data
         setpoint_array = self.setpoint_array
         control_array = self.control_array
         control_array_load = self.control_array_load
@@ -784,7 +1045,7 @@ class test():
                 force_data[i] = self.funADC.readForce()
                 print(force_data[i])
                 pressure_data[i] = self.funPT.readPSI()
-                position_data[i] = -self.funLVDT.measure()
+                displacement_data[i] = -self.funLVDT.measure()
                 temp = self.funTCamp.measure()
                 temp1[i] = temp[0]; temp2[i] = temp[1]; temp3[i] = temp[2]; temp4[i] = temp[3]
                 time_array[i] = time.time()-time0
@@ -794,14 +1055,14 @@ class test():
 
                 if force_data[i] <= 50: # Stops test when load is less than 50lb (minimum cylinder load ~80lb)
                     self.funDAC.writePSI(3)
-                    temp_force = np.zeros(i); temp_pressure = np.zeros(i); temp_position = np.zeros(i) #;temp_strain = np.zeros(i)
+                    temp_force = np.zeros(i); temp_pressure = np.zeros(i); temp_displacement = np.zeros(i) #;temp_strain = np.zeros(i)
                     temp_setpoint_array = np.zeros(i); temp_control_array_load = np.zeros(i)
                     temp_temp1 = np.zeros(i); temp_temp2 = np.zeros(i); temp_temp3 = np.zeros(i); temp_temp4 = np.zeros(i)
                     temp_time = np.zeros(i)
                     for j in range(i):
                         temp_force[j] = force_data[j] # ensures remaining data outside buffer is saved
                         temp_pressure[j] = pressure_data[j]
-                        temp_position[j] = position_data[j]
+                        temp_displacement[j] = displacement_data[j]
                         temp_setpoint_array[j] = setpoint_array[j]
                         temp_control_array_load[j] = control_array_load[j]
                         temp_temp1[j] = temp1[j]
@@ -815,451 +1076,9 @@ class test():
                 else:
                     continue
             if n==0:
-                funDAQ.save(force_data,pressure_data,position_data,setpoint_array,control_array_load,temp1,temp2,temp3,temp4,time_array)
+                funDAQ.save(force_data,pressure_data,displacement_data,setpoint_array,control_array_load,temp1,temp2,temp3,temp4,time_array)
             elif n==1:
-                funDAQ.save(temp_force,temp_pressure,temp_position,temp_setpoint_array,temp_control_array_load,temp_temp1,temp_temp2,temp_temp3,temp_temp4,temp_time)
+                funDAQ.save(temp_force,temp_pressure,temp_displacement,temp_setpoint_array,temp_control_array_load,temp_temp1,temp_temp2,temp_temp3,temp_temp4,temp_time)
                 break
             else:
                 print("ERROR")
-
-    def MODcheck_strain(self,estyield,saftey_factor=1.4,ramp_rate=25,estMOD=None):
-
-        inp = input("Please enter a file name for the modulus check data: ")
-        funDAQ = DAQ(inp)
-
-        if saftey_factor <=1.25:
-            print('Saftey factor must be larger than 1.25. Try Again')
-            exit()
-        else:
-            pass
-        LVDT_inch_resolution = self.LVDTresolution*(.5/10) # voltage(resolution)*.5"/10V (.5" travel per 10V)
-        if estMOD == None:
-            num_points = 100 # 100 data points to be collectd
-        else:
-            sigma = ((1/saftey_factor)*estyield)/estMOD # strain at yield with our saftey factor
-            dL = sigma*.5625 # strain times constant cross-sectional length (9/16"). dL is delta length, how much the specimen should elongate 
-            num_points = dL/LVDT_inch_resolution # total allowable elongation divided by measurement resolution
-            print(f"Total data points to be collected: {num_points}")
-
-        maxload = (1/saftey_factor)*(estyield*(1/64)) # maximum load reached during MOD check
-        pressure_array = np.linspace(3, ((maxload-150)/26.79),num_points) # load array from min to max load in PSI
-        force_data = np.zeros(num_points); pressure_data = np.zeros(num_points); position_data = np.zeros(num_points); strain_data = np.zeros(num_points) # allocating force,pressure, and position array
-        temp1 = np.zeros(num_points); temp2 = np.zeros(num_points); temp3 = np.zeros(num_points); temp4 = np.zeros(num_points) # allocating temperature arrays
-        setpoint_array = np.zeros(num_points); control_array = np.zeros(num_points)
-        time_array = np.zeros(num_points)
-        test_time = maxload/ramp_rate # test time in seconds
-        timeint = test_time/num_points # time interval between steps
-
-        inp2 = input(f"Max load is set to {maxload} lbs. Type CONTINUE to continue, press any key to exit()")
-        if inp2.upper().strip()=='CONTINUE':
-            self.funDAC.writePSI(3)
-            time.sleep(5)
-            pass
-        else:
-            print("MODcheck exited")
-            exit()
-        time0 = time.time()
-        for i in range(num_points):
-            time1 = time.time()
-            force_data[i] = self.funADC.readForce()
-            if force_data[i]>=maxload:
-                self.funDAC.writePSI(3)
-                print("Max load reached. Try again ")
-                exit()
-            else:
-                pass
-            pressure_data[i] = self.funPT.readPSI()
-            position_data[i] = -self.funLVDT.measure()
-            strain_data[i] = ((4/10))*self.funADC.readVoltage(channel=0b01,rate=0b01)/25.4
-            temperature = self.funTCamp.measure()
-            temp1[i] = temperature[0]; temp2[i] = temperature[1]; temp3[i] = temperature[2]; temp4[i] = temperature[3]
-            while True:
-                time2 = time.time()
-                time_array[i] = time2-time0
-                dt = time2-time1
-                if dt >= timeint:
-                    break
-                else:
-                    pass
-            self.funDAC.writePSI(pressure_array[i])
-            print(force_data[i])
-        self.funDAC.writePSI(3) # END MODCHECK
-        funDAQ.save(force_data,pressure_data,position_data,setpoint_array,control_array,strain_data,temp2,temp3,temp4,time_array)
-        df = np.zeros(num_points-1); stress = np.zeros(num_points-1); ds = np.zeros(num_points-2); E = np.zeros(num_points-2); strain = np.zeros(num_points-1) # initializing delta arrays
-        for i in range(num_points-1):
-            stress[i] = force_data[i+1]/(1/64)
-            strain[i] = (strain_data[i+1]-strain_data[0])/(.5-(strain_data[0])) # instantaneous strain
-            #print(strain[i])
-            #strain[i] = (strain_data[i+1]-strain_data[0])/.5
-        ef = np.polyfit(strain,stress,deg=1)
-        # elasticity = ef[0]*(10**-6)
-        print(f"Modulus of Elasticity (E) = {ef[0]} psi" + "\n" + "MOD CHECK COMPLETE")
-        sk = np.polyfit(position_data,force_data,deg=1)
-        stiffnessk = sk[0]
-        print(f"Stiffness K = {stiffnessk} lbs/in" + "\n" + "MOD CHECK COMPLETE")
-
-        plt.rcParams.update({'font.size': 18})
-    
-        fig, ax = plt.subplots()
-        fig2, ax2 = plt.subplots()
-        ax.set_xlim(0,max(position_data)+.002)
-        ax.set_ylim(0,max(force_data)+50)
-        ax2.set_ylim(0,max(stress)+1000)
-        ax2.set_xlim(0,max(strain)+.0002)
-        plt.axis()
-        ax.plot(abs(position_data),force_data, color='red')
-        ax2.plot(strain,stress,color='red')
-        ax.set_title(f'Force vs. Displacement: Stifness = {stiffnessk}')
-        ax.set(xlabel='Displacement (in)', ylabel='Force (Lbs)')
-        ax2.set_title(f"Stress vs Strain: E = {ef[0]} psi")
-        ax2.set(xlabel='Strain (in/in)', ylabel="Stress (psi)")
-        #print(stress)
-        #print(strain_data)
-        plt.show()
-
-    def linear_elastic(self,max_load,ramp_rate=25):
-
-        inp = input("Please enter a file name for the linear elastic data: ")
-        funDAQ = DAQ(inp)
-
-        LVDT_inch_resolution = self.LVDTresolution*(.5/10) # voltage(resolution)*.5"/10V (.5" travel per 10V)
-        num_points = 100 # 100 data points to be collectd
-
-        pressure_array = np.linspace(3, (max_load/26.79),num_points) # load array from min to max load in PSI
-        force_data = np.zeros(num_points); pressure_data = np.zeros(num_points); position_data = np.zeros(num_points); strain_data = np.zeros(num_points) # allocating force,pressure, and position array
-        temp1 = np.zeros(num_points); temp2 = np.zeros(num_points); temp3 = np.zeros(num_points); temp4 = np.zeros(num_points) # allocating temperature arrays
-        setpoint_array = np.zeros(num_points); control_array = np.zeros(num_points)
-        time_array = np.zeros(num_points)
-        test_time = max_load/ramp_rate # test time in seconds
-        timeint = test_time/num_points # time interval between steps
-
-        inp2 = input(f"Max load is set to {max_load} lbs. Type CONTINUE to continue, press any key to exit()")
-        if inp2.upper().strip()=='CONTINUE':
-            self.funDAC.writePSI(3)
-            time.sleep(5)
-            pass
-        else:
-            print("MODcheck exited")
-            exit()
-        time0 = time.time()
-        for i in range(num_points):
-            time1 = time.time()
-            force_data[i] = self.funADC.readForce()
-            if force_data[i]>=(max_load+50):
-                self.funDAC.writePSI(3)
-                print("Max load reached. Try again ")
-                exit()
-            else:
-                pass
-            pressure_data[i] = self.funPT.readPSI()
-            position_data[i] = -self.funLVDT.measure()
-            #strain_data[i] = (.225/25.4)*self.funADC.readVoltage(channel=0b01,rate=0b10) #.225mm/volt
-            temperature = self.funTCamp.measure()
-            temp1[i] = temperature[0]; temp2[i] = temperature[1]; temp3[i] = temperature[2]; temp4[i] = temperature[3]
-            self.funDAC.writePSI(pressure_array[i])
-            while True:
-                time2 = time.time()
-                time_array[i] = time2-time0
-                dt = time2-time1
-                if dt >= timeint:
-                    break
-                else:
-                    pass
-            print(force_data[i])
-        self.funDAC.writePSI(3) # END MODCHECK
-        funDAQ.save(force_data,pressure_data,position_data,setpoint_array,control_array,temp1,temp2,temp3,temp4,time_array)
-        df = np.zeros(num_points-1); stress = np.zeros(num_points-1); ds = np.zeros(num_points-2); E = np.zeros(num_points-2); strain = np.zeros(num_points-1) # initializing delta arrays
-        for i in range(num_points-1):
-            stress[i] = force_data[i+1]/(1/64)
-            strain[i] = (position_data[i+1]-position_data[0])/.5625 # instantaneous strain
-            #strain[i] = (strain_data[i+1]-strain_data[0])/.5
-        #ef = np.polyfit(strain,stress,deg=1)
-        # elasticity = ef[0]*(10**-6)
-        # print(f"Modulus of Elasticity (E) = {elasticity} Msi" + "\n" + "MOD CHECK COMPLETE")
-        sk = np.polyfit(position_data,force_data,deg=1)
-        stiffnessk = sk[0]
-        print(f"Stiffness K = {stiffnessk} lbs/in" + "\n" + "MOD CHECK COMPLETE")
-
-        plt.rcParams.update({'font.size': 18})
-    
-        fig, ax = plt.subplots()
-        plt.xlim(0,max(position_data)+.002)
-        plt.ylim(0,max(force_data)+50)
-        plt.axis
-        ax.plot(abs(position_data),force_data, color='red')
-        ax.set_title(f'Force vs. Displacement: Stifness = {stiffnessk}')
-        ax.set(xlabel='Displacement (in)', ylabel='Force (Lbs)')
-        plt.show()
-
-    def tensile(self,file_name=None):
-
-        kp = 3000; ki = 0; kd = 0; n = 0 # ORIGINAL TEST CONDUCTED AT KP = 8000; KI = 1000
-        '''
-        First tensile test conducted at Kp = 8000; Ki = 1000
-        Tensile test w/strain @ 14 bit Kp=4000; Ki=500
-        760C Kp=3000; Ki=350, small oscilations still present, could be due to jump in strain (creaking)
-        
-        '''
-
-        crosshead_rate = .03 # in/min stroke control
-        if input(f"Test Conditions: Method: STROKE CONTROL, Rate: {crosshead_rate} in/min" + "\n" + "Is this correct? Type YES to conintue, Press any other button to cancel ").upper().strip()=="YES":
-            pass
-        else:
-            exit()
-        setpoint = 0
-        inp = input("Please enter a file name for the tensile test data: ")
-        funDAQ = DAQ(inp)
-        
-        force_data = self.force_data
-        pressure_data = self.pressure_data
-        position_data = self.position_data
-        setpoint_array = self.setpoint_array
-        control_array = self.control_array
-        control_array_load = self.control_array_load
-        temp1 = self.temp1; temp2 = self.temp2; temp3 = self.temp3; temp4 = self.temp4
-        time_array = self.time_array
-        offset_array = []; offset_sum = 0
-        self.funDAC.writePSI(3) # starts pressure at zero point
-        time.sleep(5) # allows pressure to equalize
-        pid = PID(kp,ki,kd,setpoint)#PID controller with constants and setpoint. MUST BE SET AFTER WAIT TIME. PID() HAS INTERNAL TIMER
-        pid.output_limits = (3,95) #sets limit on output of PID
-        k=0; j=0; p=0; q=0
-
-        time0 = time.time()
-        while True:
-            for i in range(self.buffer_size):
-                force_data[i] = self.funADC.readForce()
-                print(force_data[i])
-                pressure_data[i] = self.funPT.readPSI()
-                position_data[i] = -self.funLVDT.measure()
-                temp = self.funTCamp.measure()
-                temp1[i] = temp[0]; temp2[i] = temp[1]; temp3[i] = temp[2]; temp4[i] = temp[3]
-                time_array[i] = time.time()-time0
-                ideal_position = crosshead_rate*time_array[i]*(1/60)
-                pid.setpoint = ideal_position
-                setpoint_array[i] = ideal_position
-                control_array[i] = pid(position_data[i])
-                control_array_load[i] = control_array[i]*26.79
-                self.funDAC.writePSI(control_array[i])
-
-                if force_data[i] <= 50: # Stops test when load is less than 50lb (minimum cylinder load ~80lb)
-                    self.funDAC.writePSI(3)
-                    temp_force = np.zeros(i); temp_pressure = np.zeros(i); temp_position = np.zeros(i) #;temp_strain = np.zeros(i)
-                    temp_setpoint_array = np.zeros(i); temp_control_array_load = np.zeros(i)
-                    temp_temp1 = np.zeros(i); temp_temp2 = np.zeros(i); temp_temp3 = np.zeros(i); temp_temp4 = np.zeros(i)
-                    temp_time = np.zeros(i)
-                    for j in range(i):
-                        temp_force[j] = force_data[j] # ensures remaining data outside buffer is saved
-                        temp_pressure[j] = pressure_data[j]
-                        temp_position[j] = position_data[j]
-                        temp_setpoint_array[j] = setpoint_array[j]
-                        temp_control_array_load[j] = control_array_load[j]
-                        temp_temp1[j] = temp1[j]
-                        temp_temp2[j] = temp2[j]
-                        temp_temp3[j] = temp3[j]
-                        temp_temp4[j] = temp4[j]
-                        temp_time[j] = time_array[j]
-                    n = 1
-                    break
-
-                else:
-                    continue
-            if n==0:
-                funDAQ.save(force_data,pressure_data,position_data,setpoint_array,control_array_load,temp1,temp2,temp3,temp4,time_array)
-            elif n==1:
-                funDAQ.save(temp_force,temp_pressure,temp_position,temp_setpoint_array,temp_control_array_load,temp_temp1,temp_temp2,temp_temp3,temp_temp4,temp_time)
-                break
-            else:
-                print("ERROR")
-
-    def tensile_strain(self,file_name=None):
-
-        kp = 3000; ki = 0; kd = 0; n = 0 # ORIGINAL TEST CONDUCTED AT KP = 8000; KI = 1000
-        '''
-        First tensile test conducted at Kp = 8000; Ki = 1000
-        Tensile test w/strain @ 14 bit Kp=4000; Ki=500
-        760C Kp=3000; Ki=350, small oscilations still present, could be due to jump in strain (creaking)
-        
-        '''
-
-        crosshead_rate = .03 # in/min stroke control
-        if input(f"Test Conditions: Method: STROKE CONTROL, Rate: {crosshead_rate} in/min" + "\n" + "Is this correct? Type YES to conintue, Press any other button to cancel ").upper().strip()=="YES":
-            pass
-        else:
-            exit()
-        setpoint = 0
-        inp = input("Please enter a file name for the tensile test data: ")
-        funDAQ = DAQ(inp)
-        
-        force_data = self.force_data
-        pressure_data = self.pressure_data
-        position_data = self.position_data
-        strain_data = self.strain_data
-        setpoint_array = self.setpoint_array
-        control_array = self.control_array
-        control_array_load = self.control_array_load
-        temp1 = self.temp1; temp2 = self.temp2; temp3 = self.temp3; temp4 = self.temp4
-        time_array = self.time_array
-        offset_array = []; offset_sum = 0
-        self.funDAC.writePSI(3) # starts pressure at zero point
-        time.sleep(5) # allows pressure to equalize
-        pid = PID(kp,ki,kd,setpoint)#PID controller with constants and setpoint. MUST BE SET AFTER WAIT TIME. PID() HAS INTERNAL TIMER
-        pid.output_limits = (3,95) #sets limit on output of PID
-        k=0; j=0; p=0; q=0
-
-        time0 = time.time()
-        while True:
-            for i in range(self.buffer_size):
-                force_data[i] = self.funADC.readForce()
-                print(force_data[i])
-                pressure_data[i] = self.funPT.readPSI()
-                position_data[i] = -self.funLVDT.measure()
-                strain_data[i] = self.funADC.readVoltage(channel=0b01,rate=0b01)
-                temp = self.funTCamp.measure()
-                temp1[i] = temp[0]; temp2[i] = temp[1]; temp3[i] = temp[2]; temp4[i] = temp[3]
-                time_array[i] = time.time()-time0
-                ideal_position = crosshead_rate*time_array[i]*(1/60)
-                pid.setpoint = ideal_position
-                setpoint_array[i] = ideal_position
-                control_array[i] = pid(position_data[i])
-                control_array_load[i] = control_array[i]*26.79
-                self.funDAC.writePSI(control_array[i])
-
-                if force_data[i] <= 50: # Stops test when load is less than 50lb (minimum cylinder load ~80lb)
-                    self.funDAC.writePSI(3)
-                    temp_force = np.zeros(i); temp_pressure = np.zeros(i); temp_position = np.zeros(i); temp_strain = np.zeros(i)
-                    temp_setpoint_array = np.zeros(i); temp_control_array_load = np.zeros(i)
-                    temp_temp1 = np.zeros(i); temp_temp2 = np.zeros(i); temp_temp3 = np.zeros(i); temp_temp4 = np.zeros(i)
-                    temp_time = np.zeros(i)
-                    for j in range(i):
-                        temp_force[j] = force_data[j] # ensures remaining data outside buffer is saved
-                        temp_pressure[j] = pressure_data[j]
-                        temp_position[j] = position_data[j]
-                        temp_strain[j] = strain_data[j]
-                        temp_setpoint_array[j] = setpoint_array[j]
-                        temp_control_array_load[j] = control_array_load[j]
-                        temp_temp1[j] = temp1[j]
-                        temp_temp2[j] = temp2[j]
-                        temp_temp3[j] = temp3[j]
-                        temp_temp4[j] = temp4[j]
-                        temp_time[j] = time_array[j]
-                    n = 1
-                    break
-
-                else:
-                    continue
-            if n==0:
-                funDAQ.save(force_data,pressure_data,position_data,setpoint_array,control_array_load,strain_data,temp2,temp3,temp4,time_array)
-            elif n==1:
-                funDAQ.save(temp_force,temp_pressure,temp_position,temp_setpoint_array,temp_control_array_load,temp_strain,temp_temp2,temp_temp3,temp_temp4,temp_time)
-                break
-            else:
-                print("ERROR")
-
-    def PIDtuning(self,file_name=None):
-
-        kp =4500; ki = 0; kd = 0; n = 0
-        maxload = 1300; #lbs
-        output_maxload = 1400
-        
-        print("Please Zero LVDT before tuning PID")
-
-        crosshead_rate = .03 # in/min stroke control
-        if input(f"Test Conditions: Method: STROKE CONTROL, Rate: {crosshead_rate} in/min" + "\n" + "Is this correct? Press enter to conintue").upper().strip()=="":
-            pass
-        else:
-            exit()
-        setpoint = 0
-        #inp = input("Please enter a file name for the tensile test data: ")
-        #funDAQ = DAQ(inp)
-        force_data = self.force_data
-        pressure_data = self.pressure_data
-        position_data = self.position_data
-        setpoint_array = self.setpoint_array
-        control_array = self.control_array
-        temp1 = self.temp1; temp2 = self.temp2; temp3 = self.temp3; temp4 = self.temp4
-        time_array = self.time_array
-        self.funDAC.writePSI(3) # starts pressure at zero point
-        time.sleep(5) # allows pressure to equalize
-        pid = PID(kp,ki,kd,setpoint)#PID controller with constants and setpoint. MUST BE SET AFTER WAIT TIME. PID() HAS INTERNAL TIMER
-        pid.output_limits = (3,(output_maxload)/26.79) #sets limit on output of PID
-        #pid.output_limits = (3,20)
-        j=0
-
-        time0 = time.time()
-        while True:
-            for i in range(self.buffer_size):
-                force_data[i] = self.funADC.readForce()
-                print(force_data[i])
-                pressure_data[i] = self.funPT.readPSI()
-                position_data[i] = -self.funLVDT.measure()
-                temp = self.funTCamp.measure(); temp1[i] = temp[0]; temp2[i] = temp[1]; temp3[i] = temp[2]; temp4[i] = temp[3]
-                time_array[i] = time.time()-time0
-                ideal_position = crosshead_rate*time_array[i]*(1/60)
-                pid.setpoint = ideal_position
-                setpoint_array[i] = ideal_position
-                control = pid(position_data[i])
-                control_array[i] = control*26.79
-                self.funDAC.writePSI(control)
-
-                if force_data[i] >= maxload:
-                    self.funDAC.writePSI(3)
-                    print("Maximum load reached")
-                    ideal_rate = np.zeros(len(position_data))
-                    for j in range(len(ideal_rate)):
-                        ideal_rate[j] = (.030/60)*time_array[j]
-                        measured_rate = np.polyfit(time_array,position_data,1)
-                    print("Measured Stroke Rate = " + str(measured_rate[0]*60))
-                    plt.rcParams.update({'font.size': 18})
-                    fig, ax = plt.subplots()
-                    fig2, ax2 = plt.subplots()
-                    ax.set_xlim(0,max(time_array)+2)
-                    ax.set_ylim(0,max(ideal_rate)+.002)
-                    ax2.set_xlim(0,max(time_array)+2)
-                    ax2.set_ylim(0,max(force_data)+50)
-                    plt.axis
-                    ax.plot(time_array[0:i],position_data[0:i], color='red',label='Measured')
-                    ax.plot(time_array[0:i],ideal_rate[0:i],color='blue',label='Setpoint')
-                    ax2.plot(time_array[0:i],force_data[0:i],color='red',label='Measured')
-                    ax2.plot(time_array[0:i],control_array[0:i],color='blue',label='Control')
-                    ax.set_title('Displacement vs time')
-                    ax2.set_title("Force vs Time")
-                    ax2.set(xlabel="Time (s)", ylabel="Force (lb)")
-                    ax.set(xlabel='Time (s)', ylabel='Displacement (in)')
-                    ax.legend(loc='lower right')
-                    ax2.legend(loc='lower right')
-                    plt.show()
-                    exit()
-
-                elif force_data[i] <= 50: # Stops test when load is less than 50lb (minimum cylinder load ~80lb)
-                    #if force_data[i]>=500:
-                    #if i==130:
-                    self.funDAC.writePSI(3)
-                    temp_force = np.zeros(i); temp_pressure = np.zeros(i); temp_position = np.zeros(i) #;temp_strain = np.zeros(i)
-                    temp_temp1 = np.zeros(i); temp_temp2 = np.zeros(i); temp_temp3 = np.zeros(i); temp_temp4 = np.zeros(i)
-                    temp_time = np.zeros(i)
-                    for j in range(i):
-                        temp_force[j] = force_data[j] # ensures remaining data outside buffer is saved
-                        temp_pressure[j] = pressure_data[j]
-                        temp_position[j] = position_data[j]
-                        #temp_strain[j] = strain_data[j]
-                        temp_temp1[j] = temp1[j]
-                        temp_temp2[j] = temp2[j]
-                        temp_temp3[j] = temp3[j]
-                        temp_temp4[j] = temp4[j]
-                        temp_time[j] = time_array[j]
-                    n = 1
-                    break
-
-                else:
-                    continue
-            if n==0:
-                #funDAQ.save(force_data,pressure_data,position_data,temp1,temp2,temp3,temp4,time_array)
-                abc = 1
-            elif n==1:
-                #funDAQ.save(temp_force,temp_pressure,temp_position,temp_temp1,temp_temp2,temp_temp3,temp_temp4,temp_time)
-                efg = 1
-                break
-            else:
-                print("ERROR")
-
