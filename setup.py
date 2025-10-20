@@ -24,11 +24,14 @@ setup(
         'simple-pid==2.0.1',
         'six==1.17.0',
         'smbus3==0.5.5',
-        'tzdata==2025.2'
+        'tzdata==2025.2',
+        'scipy==1.16.2',
+        'scikit-learn==1.7.2'
     ],
     entry_points={
-        'consol_scripts':[
-            'ats = ats.main:start_gui'
+        'console_scripts':[
+            'ats = ats_suite.gui:main',
+            'ATS = ats_suite.gui:main'
         ]
     },
     classifiers=[

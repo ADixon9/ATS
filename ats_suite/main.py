@@ -9,7 +9,10 @@ import matplotlib.pyplot as plt
 from subprocess import check_output
 from simple_pid import PID
 from datetime import datetime
-from solver import *
+try:
+        from .solver import *
+except ImportError:
+        from solver import *
 from scipy.signal import savgol_filter
 from sklearn.linear_model import LinearRegression
 import shutil
@@ -298,22 +301,28 @@ class PT():
 
 class TCamp():
 
-    def __init__(self,config_register=0b00000110,resolution=0b00000000,TC_config_register=0b00000101,TC_type=0b01000000):
-        ''' SEE READ_ME FOR CONFIGURATION SETTINGS. TC_TYPE: 0b00000000 for K-Type filter off, 0b01000000 for S-Type filter off'''
-        t=.05
-        self.addr = addr = [0x64,0x65,0x66,0x67]
-        for i in range(len(addr)):
-            bus.write_byte_data(addr[i],config_register,resolution)#writing to device configuration register, 18-bit nominal resolution
-            time.sleep(t)
-        # for i in range(len(addr)):
-        #     bus.write_byte(addr[i],resolution)#writing 18-bit nominal resolution to configuration register
-        #     time.sleep(t)
-        for i in range(len(addr)):
-            bus.write_byte_data(addr[i],TC_config_register,TC_type)#writing to TC configuration register, S-Type TC, filter off
-            time.sleep(t)
-        # for i in range(len(addr)):
-        #     bus.write_byte(addr[i],TC_type)#writing S-type TC, filter off
-        #     time.sleep(t)
+    def __init__(self,log_callback,config_register=0b00000110,resolution=0b00000000,TC_config_register=0b00000101,TC_type=0b01000000):
+        self.refresh(log_callback,config_register,resolution,TC_config_register,TC_type) # run refresh method
+
+    def refresh(self,log_callback,config_register,resolution,TC_config_register,TC_type):
+        self.log = log_callback # define log attribute
+        try:
+            t=.05
+            self.addr = addr = [0x64,0x65,0x66,0x67]
+            for i in range(len(addr)):
+                bus.write_byte_data(addr[i],config_register,resolution)#writing to device configuration register, 18-bit nominal resolution
+                time.sleep(t)
+            # for i in range(len(addr)):
+            #     bus.write_byte(addr[i],resolution)#writing 18-bit nominal resolution to configuration register
+            #     time.sleep(t)
+            for i in range(len(addr)):
+                bus.write_byte_data(addr[i],TC_config_register,TC_type)#writing to TC configuration register, S-Type TC, filter off
+                time.sleep(t)
+            # for i in range(len(addr)):
+            #     bus.write_byte(addr[i],TC_type)#writing S-type TC, filter off
+            #     time.sleep(t)
+        except OSError:
+            self.log("Thermocouple amplifier(s) not connected. Rehash to re-attempt connection.")
 
     def measure(self,channel1=True,channel2=True,channel3=True,channel4=True):
         '''
@@ -473,7 +482,7 @@ class furnace_control():
     def __init__(self):
 
         self.funDAC_furnace = DAC_furnace() #initialize instance of furnace DAC class inside furnace_control class
-        self.funTCamp = TCamp()
+        self.funTCamp = TCamp(log_callback=None)
         self.kp = 0.15; self.ki = 0.002; self.kd = 0 #PID tuning parameters for Maintaining temperature Kd was .001
         self.temperature_array = []
 
@@ -669,7 +678,7 @@ class test():
                             status_callback=None,
                             current_position_callback=None,
                             current_voltage_callback=None) #creates instance of LVDT class internal to "test" function
-        self.funTCamp = TCamp() # creates instance of TC amp class internal to "test" function
+        self.funTCamp = TCamp(log_callback=log_callback) # creates instance of TC amp class internal to "test" function
         # ----- Callbacks -----
         self.log = log_callback # define log variable
         self.test_status = test_status_callback # define test status variable

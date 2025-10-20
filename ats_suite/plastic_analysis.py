@@ -3,7 +3,10 @@ import pandas as pd
 from scipy.signal import savgol_filter
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
-from solver import *
+try:
+        from .solver import *
+except ImportError:
+        from solver import *
 import matplotlib.pyplot as plt
 import time
 import os

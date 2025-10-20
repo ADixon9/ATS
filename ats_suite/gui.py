@@ -1,8 +1,13 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, PhotoImage
-from main import *
-from solver import *
-from plastic_analysis import *
+try: # run as package
+    from .main import *
+    from .solver import *
+    from .plastic_analysis import *
+except ImportError: # run at top-level
+    from main import *
+    from solver import *
+    from plastic_analysis import *
 import matplotlib
 import random
 import pandas as pd
@@ -188,6 +193,8 @@ class GUI:
         self.file_name_tuning_tab_tk = tk.StringVar(value='') # define file name tk string variable for tuning tab
         self.folder_path = tk.StringVar(value=os.getcwd())
         self.running = False
+        # ===== Setup Tabs =====
+        self.setup_tabs()
         # ===== Instantiate classes =====
         self.funtest = test(log_callback=self.log_command,
                             test_status_callback=self.test_status)
@@ -201,8 +208,6 @@ class GUI:
                         current_force_callback=self.PT_get_current_force)
         self.funDAC = DAC(log_callback=self.log_command,
                           status_callback=self.calibration_status)
-        # ===== Setup Tabs =====
-        self.setup_tabs()
         # ===== Log Startup =====
         self.log_command("AeroForce Test System running...")
 
@@ -300,7 +305,7 @@ class GUI:
         self.start_button_pretest_tab.grid(row=4, column=0, pady=5) # layout start button
         self.stop_button_pretest_tab = tk.Button(self.middle_frame_pretest,
                                                  text="Stop Test",
-                                                 command=self.funtest.stop_test,
+                                                 command=self.on_test_stop_button,
                                                  bg="red",
                                                  fg="white") # create button to stop test
         self.stop_button_pretest_tab.grid(row=4, column=1, pady=5) # layout stop button
@@ -379,7 +384,7 @@ class GUI:
                   fg="white").grid(row=4, column=0, pady=5) # create button to start test
         tk.Button(self.middle_frame_test,
                   text="Stop Test",
-                  command=self.funtest.stop_test,
+                  command=self.on_test_stop_button,
                   bg="red",
                   fg="white").grid(row=4, column=1, pady=5) # create button to stop test
         # ===== Live Plot =====
@@ -734,7 +739,7 @@ class GUI:
                   fg="white").grid(row=3, column=0, pady=5) # create button to start test
         tk.Button(self.middle_frame_tuning,
                   text="Stop Test",
-                  command=self.funtest.stop_test,
+                  command=self.on_test_stop_button,
                   bg="red",
                   fg="white").grid(row=3, column=1, pady=5) # create button to stop test
         # ===== Live Plot =====
@@ -1866,7 +1871,7 @@ class GUI:
                                                                                                                             fg='white') # create start test button
             self.start_FC_test_button.grid(row=1,column=2,sticky='w') # layout start button
             self.stop_FC_test_button = tk.Button(self.param_frame_calibration_tab,
-                                                 command=self.funtest.stop_test,
+                                                 command=self.on_test_stop_button,
                                                  text="Stop Test",
                                                  width=button_width,
                                                  bg='red',
@@ -1946,6 +1951,10 @@ class GUI:
                 self.log_command("Please enter a positive non-zero value for stroke rate,Kp, and maximum load...")
             else:
                 self.start_tuning_threading(file_path=new_path,stroke_rate=stroke_rate,kp=kp,max_load=max_load) # start threading for tuning operation
+
+    def on_test_stop_button(self,event=None):
+        # ===== Stop Test =====
+        self.funtest.stop_test() # Run stop_test method of funtest class (from main.py)
 
     def modcheck_confirmation(self):
         # ===== Create Confirmation Window =====
@@ -2294,6 +2303,11 @@ class GUI:
 
 # ===== Tkinter GUI setup =====
 if __name__=="__main__":
+    app = GUI()
+    app.root.protocol("WM_DELETE_WINDOW",app.exit_program)
+    app.root.mainloop()
+    
+def main():
     app = GUI()
     app.root.protocol("WM_DELETE_WINDOW",app.exit_program)
     app.root.mainloop()
