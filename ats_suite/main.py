@@ -152,9 +152,10 @@ class DAC():
 
         try: # try writing calibrated pressure
             calibrated_psi = (psi*self.slope)+self.zero # calculate calibrated psi - units are in psi
-            voltage = (((10/95)*calibrated_psi)-(30/95)) # eq. of line given (0v, 3psi) & (10v, 98psi)
+            line = np.polyfit([3,98],[0,10],1) # equation of a line given the points: x (3,98) y (0,10) 
+            voltage = ((line[0]*calibrated_psi)-line[1]) # calibrated voltage
         except AttributeError: # except if no calibration exists
-            voltage = (((10/95)*psi)-(30/95)) # eq. of line given (0v, 3psi) & (10v, 98psi)
+            voltage = ((line[0]*psi)-line[1]) # eq. of line given (0v, 3psi) & (10v, 98psi)
         self.writeVoltage(voltage)
         if callback==False:
             pass

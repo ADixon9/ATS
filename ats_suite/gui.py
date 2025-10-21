@@ -82,6 +82,7 @@ priority: [1] - highest, [4] - lowest
 -[2] stress strain axis limits when pressing home on analysis plot is off
 -[1] add a voltage measurement to functions tab - this will be used to determine where the LVDT position lies in its range
 -[4] allow user to set default values for entries (i.e. kp, stroke rate, etc)
+-*****[1]***** Add functionality to set the users maximum and minimum pressure, configure ADC channels and adjust force conversion factors in a settings tab
 
 
 '''
@@ -349,13 +350,13 @@ class GUI:
         top_frame = tk.Frame(self.test_tab) # create top frame where values, entry boxes, and drop downs are housed on the test tab (notebook)
         top_frame.grid(row=0,column=0,padx=10, pady=0,sticky='ew') # size of top frame
         # ----- Force/Pressure/Displacement -----
-        tk.Label(top_frame, text="Force (N):").grid(row=0, column=0, sticky="e") # create force label, sticking to right side
+        tk.Label(top_frame, text="Force (Lbf):").grid(row=0, column=0, sticky="e") # create force label, sticking to right side
         tk.Label(top_frame, textvariable=self.force_var).grid(row=0, column=1, sticky="w") # create force variable label, sticking to left side
 
         tk.Label(top_frame, text="Pressure (psi):").grid(row=0, column=2, sticky="e") # create pressure label, sticking to right side
         tk.Label(top_frame, textvariable=self.pressure_var).grid(row=0, column=3, sticky="w") # create pressure variable label, sticking to left side
 
-        tk.Label(top_frame, text="Displacement (mm):").grid(row=0, column=4, sticky="e") # create displacement label, sticking to right side
+        tk.Label(top_frame, text="Displacement (in):").grid(row=0, column=4, sticky="e") # create displacement label, sticking to right side
         tk.Label(top_frame, textvariable=self.displacement_var).grid(row=0, column=5, sticky="w") # create displacement variable label, sticking to left side
         # ===== Controls =====
         self.middle_frame_test = tk.Frame(self.test_tab) # create middle frame for test methods and start/stop buttons
@@ -581,12 +582,12 @@ class GUI:
         right_frame.grid(row=1,column=1,padx=10,pady=5,sticky='new') # define padding and fill of right frame
         # ===== Create Labels,Entrys =====
         tk.Label(header_frame,text="ATS Calibration",font=('TkDefaultFont',16,'bold'),justify='center').grid(row=0,column=0,sticky='nsew')
-        tk.Label(left_frame,text="Calibration Options:").grid(row=0,column=0,sticky="e")# create calibration options label
+        tk.Label(left_frame,text="Device:").grid(row=0,column=0,sticky="e")# create calibration options label
         tk.Label(left_frame,text="File Name:").grid(row=1,column=0,sticky="e") # define file name label
         self.file_name_calibration_tab = tk.Entry(left_frame,textvariable=self.file_name_calibration_tab,text="Enter File Name For Calibration Data",width=21) # define file name entry
         self.file_name_calibration_tab.grid(row=1,column=1,sticky='w')
         tk.Button(left_frame,text="Select File Directory",command=self.select_folder).grid(row=1,column=2,sticky="w") # create button to select file directory for new file
-        tk.Label(left_frame,text="Number of Points for Calibration:").grid(row=0,column=2,sticky='w') # create label for number of calibration points
+        tk.Label(left_frame,text="Number of Points:").grid(row=0,column=2,sticky='w') # create label for number of calibration points
         self.num_points_entry_calibration_tab = tk.Entry(left_frame,textvariable=self.num_calibration_pts)
         self.num_points_entry_calibration_tab.grid(row=0,column=3,sticky='w') # create entry box for number of calibration points
         # ===== Create Calibration Drop Down Box ====
