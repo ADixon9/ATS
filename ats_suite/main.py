@@ -849,7 +849,6 @@ class test():
 
     def tensile(self,kp,stroke_rate,file_path,status_callback='default'):
         funDAQ = DAQ(file_path=file_path,log_data_save_callback=None) # instantiate DAQ class
-        stroke_rate = .03 # in/min stroke control
         piston_area = 26.79 # define the area of the piston for force calculation
         ki=0;kd=0;setpoint=0
         pid = PID(kp,ki,kd,setpoint)#PID controller with constants and setpoint
@@ -940,7 +939,6 @@ class test():
 
     def PIDtuning(self,kp,stroke_rate,max_load,file_path,status_callback='default'):
         funDAQ = DAQ(file_path=file_path,log_data_save_callback=None) # instantiate DAQ class
-        stroke_rate = .03 # in/min stroke control
         piston_area = 26.79 # define the area of the piston for force calculation
         ki=0;kd=0;setpoint=0
         pid = PID(kp,ki,kd,setpoint)#PID controller with constants and setpoint
