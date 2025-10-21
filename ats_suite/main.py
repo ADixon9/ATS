@@ -46,9 +46,9 @@ class ADC(): #ADS1115 Chip
             config = [0b00000000,0b11100011] # see pg 18 of ADS1115 data sheet to change configuration. This configuration is set to standard operation, continuous conversion, 860SPS, AIN0 = +, AIN1 = - (differential)
         elif device=="pressure_transducer":
             #config = [0b01100000,0b11100011] # see pg 18 of ADS1115 data sheet to change configuration. This configuration is set to standard operation, continuous conversion, 860SPS, AIN2 = +, AIN3 = - (differential)
-            config = [0b01100000,0b11100011] # config for strain measurement, changes differential to single ended input
-        elif device=="extensometer":
-            config = [0b01110000,0b11100011]
+            config = [0b01100000,0b11100011] # AIN2 = +, AIN GND = -
+        elif device=="load_cell":
+            config = [0b01110000,0b11100011] # AIN3 = +, AIN GND = -
         else:
             print("ERROR: ADC input device not recognized...")
         bus.write_i2c_block_data(self.address,config_register,config) # write configuration to configuration register
@@ -67,8 +67,15 @@ class ADC(): #ADS1115 Chip
         self.config(device) # configure ADC to read from selected device
         rawData = bus.read_i2c_block_data(self.address,0b00000000,2) ## Reads binary 16-bit voltage value from conversion register
         myCodevalue = (rawData[0]<<8 | rawData[1]) ## (<<8 is pushing the first byte 8 bits to the left to position the first byte)(MSB is +/- sign, reads 0 since only +)
-        
         return myCodevalue
+
+    def readForce(self):
+        voltage = self.readVoltage(device='load_cell') # read ouput voltage from load cell
+        line = np.polyfit([0,5],[0,1500],1) # linear fit to convert voltage to force
+        force = (line[0]*voltage)-line[1] # calculate force from measured voltage
+        return float("%.2f" % force) # return force formatted to two decimal places
+
+
 
 class DAC():
 
@@ -146,13 +153,13 @@ class DAC():
         if psi > 98:
             self.log("Pressure cannot exceed 98 psi...") # log command
             psi = 98 # set maximum pressure
-        elif psi < 3:
-            self.log("Pressure must be at least 3 psi...") # log command
-            psi = 3 # set minimum pressure
+        elif psi < 0:
+            self.log("Pressure must be at least 0 psi...") # log command
+            psi = 0 # set minimum pressure
 
         try: # try writing calibrated pressure
             calibrated_psi = (psi*self.slope)+self.zero # calculate calibrated psi - units are in psi
-            line = np.polyfit([3,98],[0,10],1) # equation of a line given the points: x (3,98) y (0,10) 
+            line = np.polyfit([0,98],[0,10],1) # equation of a line given the points: x (3,98) y (0,10) 
             voltage = ((line[0]*calibrated_psi)-line[1]) # calibrated voltage
         except AttributeError: # except if no calibration exists
             voltage = ((line[0]*psi)-line[1]) # eq. of line given (0v, 3psi) & (10v, 98psi)
@@ -293,7 +300,7 @@ class PT():
             pressure = (self.funADC.readRaw(device='pressure_transducer')*self.slope + self.zero) # measure pressure        
         except AttributeError:
             self.log('MEASUREMENT ERROR: No calibration data available, please calibrate and try again...')
-        force = (26.79*pressure)
+        force = (12.57*pressure)
         if callback==False:
             pass
         elif callback==True:
@@ -746,11 +753,11 @@ class test():
         # ===== Calculate Number of Data Points To Be Collected ======
         n = 0 # loop counter
         step_size_psi = .01 # set step size in psi
-        piston_area = 26.79 # define the area of the piston for force calculation
+        piston_area = 12.57 # define the area of the piston for force calculation
         max_pressure = 2*(maxload/piston_area) # maximum load divided by the piston area - multiplied by two for setpoint array buffer
-        min_pressure = 3 # define minimum pressure
+        min_pressure = 0 # define minimum pressure
         num_points =  round((max_pressure-min_pressure)/(2*step_size_psi))# calculate the total number of points to be collected (pressure range/step size) - divide by 2 to keep step size the same given the buffer
-        pressure_setpoint_array = np.linspace(3,max_pressure,num_points) # pressure setpoint array from min to max load in PSI
+        pressure_setpoint_array = np.linspace(min_pressure,max_pressure,num_points) # pressure setpoint array from min to max load in PSI
         total_test_time = maxload/load_rate # calculate total test time in seconds
         time_interval = total_test_time/num_points # calculate expected time interval
         start_time = time.time() # get start time
@@ -759,11 +766,10 @@ class test():
                 current_time = time.time() # get current time
                 # ===== Read Data =====
                 self.pressure_data[i] = self.funPT.readPSI(callback=False) # get current pressure
-                self.force_data[i] = self.pressure_data[i]*piston_area # pressure*area=force
+                self.force_data[i] = self.funADC.readForce() # get current force
                 self.displacement_data[i] = self.funLVDT.measure(callback=False) # get current displacement
                 temperature = self.funTCamp.measure() # measure all four temperatures
-                self.strain_data[i] = self.funADC.readVoltage(device='extensometer')
-                #self.temp1[i] = temperature[0] # assign temp 1
+                self.temp1[i] = temperature[0] # assign temp 1
                 self.temp2[i] = temperature[1] # assign temp 2
                 self.temp3[i] = temperature[2] # assign temp 3
                 self.temp4[i] = temperature[3] # assign temp 4
@@ -789,8 +795,7 @@ class test():
                         temp_displacement[j] = self.displacement_data[j]
                         temp_setpoint_array[j] = pressure_setpoint_array[j]
                         temp_control_array[j] = pressure_setpoint_array[j]
-                        #temp_temp1[j] = self.temp1[j]
-                        temp_temp1[j] = self.strain_data[j]
+                        temp_temp1[j] = self.temp1[j]
                         temp_temp2[j] = self.temp2[j]
                         temp_temp3[j] = self.temp3[j]
                         temp_temp4[j] = self.temp4[j]
@@ -834,8 +839,7 @@ class test():
                         displacement = self.displacement_data,
                         setpoint = pressure_setpoint_array[-self.buffer_size:],
                         control = pressure_setpoint_array[-self.buffer_size:],
-                        #temp1 = self.temp1,
-                        temp1 = self.strain_data,
+                        temp1 = self.temp1,
                         temp2 = self.temp2,
                         temp3 = self.temp3,
                         temp4 = self.temp4,
@@ -849,22 +853,20 @@ class test():
 
     def tensile(self,kp,stroke_rate,file_path,status_callback='default'):
         funDAQ = DAQ(file_path=file_path,log_data_save_callback=None) # instantiate DAQ class
-        stroke_rate = .03 # in/min stroke control
-        piston_area = 26.79 # define the area of the piston for force calculation
+        piston_area = 12.57 # define the area of the piston for force calculation
         ki=0;kd=0;setpoint=0
         pid = PID(kp,ki,kd,setpoint)#PID controller with constants and setpoint
-        pid.output_limits = (3,98) #sets limit on output of PID
+        pid.output_limits = (0,98) #sets limit on output of PID
         start_time = time.time() # get start time
         while True:
             for i in range(self.buffer_size):
                 current_time = time.time() # get current time
                 # ===== Read Data =====
                 self.pressure_data[i] = self.funPT.readPSI(callback=False) # get current pressure
-                self.force_data[i] = self.pressure_data[i]*piston_area # pressure*area=force
+                self.force_data[i] = self.funADC.readForce() # get current force
                 self.displacement_data[i] = self.funLVDT.measure(callback=False) # measure displacement
                 temperature = self.funTCamp.measure() # measure all four temperatures
-                self.strain_data[i] = self.funADC.readVoltage(device='extensometer')
-                #self.temp1[i] = temperature[0] # assign temp 1
+                 self.temp1[i] = temperature[0] # assign temp 1
                 self.temp2[i] = temperature[1] # assign temp 2
                 self.temp3[i] = temperature[2] # assign temp 3
                 self.temp4[i] = temperature[3] # assign temp 4
@@ -897,8 +899,7 @@ class test():
                         temp_displacement[j] = self.displacement_data[j]
                         temp_setpoint_array[j] = self.setpoint_array[j]
                         temp_control_array[j] = self.control_array[j]
-                        #temp_temp1[j] = self.temp1[j]
-                        temp_temp1[j] = self.strain_data[j]
+                        temp_temp1[j] = self.temp1[j]
                         temp_temp2[j] = self.temp2[j]
                         temp_temp3[j] = self.temp3[j]
                         temp_temp4[j] = self.temp4[j]
@@ -927,8 +928,7 @@ class test():
                         displacement = self.displacement_data,
                         setpoint = self.setpoint_array,
                         control = self.control_array,
-                        #temp1 = self.temp1,
-                        temp1 = self.strain_data,
+                        temp1 = self.temp1,
                         temp2 = self.temp2,
                         temp3 = self.temp3,
                         temp4 = self.temp4,
@@ -940,18 +940,17 @@ class test():
 
     def PIDtuning(self,kp,stroke_rate,max_load,file_path,status_callback='default'):
         funDAQ = DAQ(file_path=file_path,log_data_save_callback=None) # instantiate DAQ class
-        stroke_rate = .03 # in/min stroke control
-        piston_area = 26.79 # define the area of the piston for force calculation
+        piston_area = 12.57 # define the area of the piston for force calculation
         ki=0;kd=0;setpoint=0
         pid = PID(kp,ki,kd,setpoint)#PID controller with constants and setpoint
-        pid.output_limits = (3,98) #sets limit on output of PID
+        pid.output_limits = (0,98) #sets limit on output of PID
         start_time = time.time() # get start time
         while True:
             for i in range(self.buffer_size):
                 current_time = time.time() # get current time
                 # ===== Read Data =====
                 self.pressure_data[i] = self.funPT.readPSI(callback=False) # get current pressure
-                self.force_data[i] = self.pressure_data[i]*piston_area # pressure*area=force
+                self.force_data[i] = self.funADC.readForce() # get current force
                 self.displacement_data[i] = self.funLVDT.measure(callback=False) # measure displacement
                 temperature = self.funTCamp.measure() # measure all four temperatures
                 self.temp1[i] = temperature[0] # assign temp 1
@@ -963,7 +962,7 @@ class test():
                 pid.setpoint = setpoint # update PID controller setpoint
                 self.setpoint_array[i] = setpoint # assign setpoint to data array
                 self.control_array[i] = pid(self.displacement_data[i]) # assign control value to data array
-                self.control_array_load[i] = self.control_array[i]*26.79 # convert control in psi to force (lbs)
+                self.control_array_load[i] = self.control_array[i]*piston_area # convert control in psi to force (lbs)
                 self.funDAC.writePSI(self.control_array[i]) # write the control pressure
                 # ===== End Test If Max Load Is Reached =====
                 if self.force_data[i]>=max_load or self.stop_event==True: # stops test when max load is reached orstop test button is pressed
