@@ -123,6 +123,9 @@ class GUI:
         self.enable_x_shift_analysis_tab_tk = tk.IntVar(value=0) # define integer variable to enable/disable x shifting
         self.enable_y_shift_analysis_tab_tk = tk.IntVar(value=0) # define integer vairable to enable/disable y shifting
         self.num_calibration_pts = tk.IntVar(value=10) # define integer variable for number of calibration points
+        # ===== ADC =====
+        self.ADC_current_lc_voltage_tk = tk.DoubleVar(value=0) # define current ADC load cell voltage
+        self.ADC_current_force_tk = tk.DoubleVar(value=0) # define current load cell force measured via ADC
         # ===== LVDT =====
         self.LVDT_cal_input_displacement_tk = tk.DoubleVar(value=0) # define LVDT Displacement variable
         self.LVDT_current_position_tk = tk.DoubleVar(value=0) # define current LVDT displacement variable
@@ -199,6 +202,9 @@ class GUI:
         # ===== Instantiate classes =====
         self.funtest = test(log_callback=self.log_command,
                             test_status_callback=self.test_status)
+        self.funADC = ADC(log_callback=self.log_command,
+                          current_lc_voltage_callback=self.ADC_get_current_lc_voltage,
+                          current_force_callback=self.ADC_get_current_force)
         self.funLVDT = LVDT(log_callback=self.log_command,
                             status_callback=self.calibration_status,
                             current_position_callback=self.LVDT_get_current_position,
@@ -658,6 +664,8 @@ class GUI:
         pressure_transducer_frame.grid(row=1,column=0,sticky='new') # layout pressure transducer frame
         ip_transducer_frame = tk.Frame(middle_frame,bd=1,relief='solid') # create I/P transducer frame
         ip_transducer_frame.grid(row=2,column=0,sticky='new') # layout I/P frame
+        load_cell_frame = tk.Frame(middle_frame,bd=1,relief='solid') # create load cell frame
+        load_cell_frame.grid(row=3,column=0,sticky='new') # layout load cell frame
         tk.Label(header_frame,text='ATS Functions',font=('TkDefaultFont',16,'bold'),justify='center').grid(row=0,column=0,sticky='nsew') # create header label
         # ===== LVDT =====
         tk.Label(LVDT_frame,text='LVDT',font=('TkDefaultFont',12,'bold'),justify='center').grid(row=0,column=0,columnspan=3,sticky='nsew') # create LVDT header
@@ -673,7 +681,7 @@ class GUI:
         tk.Label(pressure_transducer_frame,text='Pressure Transducer',font=('TkDefaultFont',12,'bold'),justify='center').grid(row=0,column=0,columnspan=3,sticky='nsew') # create header label
         tk.Label(pressure_transducer_frame,text="Current Pressure (psi):").grid(row=1,column=0,sticky='e') # create current pressure label
         tk.Entry(pressure_transducer_frame,textvariable=self.PT_current_pressure_tk,state='readonly',width=entry_width).grid(row=1,column=1,sticky='w') # display current pressure
-        tk.Label(pressure_transducer_frame,text="Current Force (lb):").grid(row=2,column=0,sticky='e') # create current force label
+        tk.Label(pressure_transducer_frame,text="Current Force (lbs):").grid(row=2,column=0,sticky='e') # create current force label
         tk.Entry(pressure_transducer_frame,textvariable=self.PT_current_force_tk,state='readonly',width=entry_width).grid(row=2,column=1,sticky='w') # display current force
         tk.Button(pressure_transducer_frame,text='Measure',command=lambda: (self.funPT.readPSI(callback=True),self.funPT.readForce(callback=True)),width=button_width).grid(row=1,column=2,sticky='w') # create measure button
         tk.Label(pressure_transducer_frame,text="Zero Offset Pressure (psi):").grid(row=3,column=0,sticky='w') # create zero offset pressure label
@@ -684,9 +692,16 @@ class GUI:
         tk.Label(ip_transducer_frame,text='Set Pressure (psi):').grid(row=1,column=0,sticky='w') # create set pressure label
         tk.Entry(ip_transducer_frame,textvariable=self.DAC_set_pressure_tk,width=entry_width).grid(row=1,column=1,sticky='w')
         tk.Button(ip_transducer_frame,text='Set Pressure',command=lambda: (self.funDAC.writePSI(self.DAC_set_pressure_tk.get(),callback=True)),width=button_width).grid(row=1,column=2,sticky='w') # create set pressure button
+        # ===== Load Cell =====
+        tk.Label(load_cell_frame,text='Load Cell',font=('TkDefaultFont',12,'bold'),justify='center').grid(row=0,column=0,columnspan=3,sticky='nsew') # create header label
+        tk.Label(load_cell_frame,text='Current Force (lbs):').grid(row=1,column=0,sticky='w') # create current force label
+        tk.Label(load_cell_frame,text='Current Voltage (V):').grid(row=2,column=0,sticky='w') # create current voltage label
+        tk.Entry(load_cell_frame,textvariable=self.ADC_current_force_tk,state='readonly',width=entry_width).grid(row=1,column=1,sticky='w') # display current force
+        tk.Entry(load_cell_frame,textvariable=self.ADC_current_lc_voltage_tk,state='readonly',width=entry_width).grid(row=2,column=1,sticky='w') # display current voltage
+        tk.Button(load_cell_frame,text='Measure',command=lambda: (self.funADC.readForce(callback=True),self.funADC.readVoltage(device='load_cell',callback=True)),width=button_width).grid(row=1,column=2,sticky='w') # create measure button
         # ===== Command Window =====
         cmd_frame = tk.LabelFrame(self.functions_tab,text="Command Log",labelanchor='n') # create cmd_frame
-        cmd_frame.grid(row=2,column=0,columnspan=2,sticky='nsew')
+        cmd_frame.grid(row=4,column=0,columnspan=2,sticky='nsew')
         self.cmd_text_box_functions = tk.Text(cmd_frame,height=4,state='disabled') # create text box window
         self.cmd_text_box_functions.grid(row=0,column=0,sticky="nsew") # layout text box
         vsb = ttk.Scrollbar(cmd_frame, orient="vertical", command=self.cmd_text_box_test.yview)
@@ -701,6 +716,7 @@ class GUI:
         LVDT_frame.columnconfigure(2,weight=1)
         pressure_transducer_frame.columnconfigure(2,weight=1)
         ip_transducer_frame.columnconfigure(2,weight=1)
+        load_cell_frame.columnconfigure(2,weight=1)
         cmd_frame.columnconfigure(0,weight=1)
 
     def create_tuning_tab(self):
@@ -2162,6 +2178,9 @@ class GUI:
         # ===== Rehash Classes =====
         # allows classes to load most recent calibration data
         ''' refreshing is done to avoid different instances bound to multiple widgets'''
+        self.funADC.refresh(log_callback=self.log_command,
+                            current_lc_voltage_callback=self.ADC_get_current_lc_voltage,
+                            current_force_callback=self.ADC_get_current_force)
         self.funtest.refresh(log_callback=self.log_command,
                             test_status_callback=self.test_status)
         self.funLVDT.refresh(log_callback=self.log_command,
@@ -2174,6 +2193,12 @@ class GUI:
                         current_force_callback=self.PT_get_current_force)
         self.funDAC.refresh(log_callback=self.log_command,
                           status_callback=self.calibration_status)
+
+    def ADC_get_current_lc_voltage(self,current_lc_voltage: float):
+        self.ADC_current_lc_voltage_tk.set(round(current_lc_voltage,5)) # update text variable for current load cell voltage
+
+    def ADC_get_current_force(self,current_force: float):
+        self.ADC_current_force_tk.set(round(current_force,2)) # update text variable for current force
 
     def LVDT_calibration_call(self,displacement):
         self.funLVDT.record_calibration_point(displacement=displacement,num_points=self.num_calibration_pts.get()) # record calibration point

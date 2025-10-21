@@ -33,11 +33,14 @@ KNOWN PROBLEMS
 
 class ADC(): #ADS1115 Chip
 
-    def __init__(self):
-        self.refresh()
+    def __init__(self,log_callback,current_lc_voltage_callback,current_force_callback):
+        self.refresh(log_callback,current_lc_voltage_callback,current_force_callback)
 
-    def refresh(self):
+    def refresh(self,log_callback,current_lc_voltage_callback,current_force_callback):
         self.address = 0x48
+        self.log = log_callback # define log attribute
+        self.current_voltage = current_lc_voltage_callback # define voltage attribute
+        self.current_force = current_force_callback # define force attribute
 
     def config(self,device):
         ''' Maximum SPS: 525 tested for errors switching between devices @ 100k samples zero errors'''
@@ -50,16 +53,21 @@ class ADC(): #ADS1115 Chip
         elif device=="load_cell":
             config = [0b01110000,0b11100011] # AIN3 = +, AIN GND = -
         else:
-            print("ERROR: ADC input device not recognized...")
+            self.log("ERROR: ADC input device not recognized...")
         bus.write_i2c_block_data(self.address,config_register,config) # write configuration to configuration register
         time.sleep(1/520) # wait for configuration to activate
 
 
-    def readVoltage(self,device):
+    def readVoltage(self,device,callback=False):
         self.config(device) # configure ADC to read from selected device
         rawData = bus.read_i2c_block_data(self.address,0b00000000,2) ## Reads binary 16-bit voltage value from conversion register
         myCodevalue = (rawData[0]<<8 | rawData[1]) ## (<<8 is pushing the first byte 8 bits to the left to position the first byte)(MSB is +/- sign, reads 0 since only +)
         voltage = (5*myCodevalue)/26715 # calibrated to read 5v out with a 5v input. Verified using a fluke multimeter. ideal value is 32767
+        if callback==False:
+            pass
+        if callback==True:
+            self.current_voltage(voltage) # log current voltage
+            self.log("ADC voltage measurement recorded...") # log measurement recorded
         return float("%.4f" % voltage) ## formats to three decimal places. (.3f means 3 decimals, (f) float)
     
     def readRaw(self,device):
@@ -69,10 +77,15 @@ class ADC(): #ADS1115 Chip
         myCodevalue = (rawData[0]<<8 | rawData[1]) ## (<<8 is pushing the first byte 8 bits to the left to position the first byte)(MSB is +/- sign, reads 0 since only +)
         return myCodevalue
 
-    def readForce(self):
+    def readForce(self,callback=False):
         voltage = self.readVoltage(device='load_cell') # read ouput voltage from load cell
         line = np.polyfit([0,5],[0,1500],1) # linear fit to convert voltage to force
         force = (line[0]*voltage)-line[1] # calculate force from measured voltage
+        if callback==False:
+            pass
+        if callback==True:
+            self.current_force(force) # log current force
+            self.log("Force measurement recorded") # log measurement recorded
         return float("%.2f" % force) # return force formatted to two decimal places
 
 
@@ -223,7 +236,9 @@ class PT():
         self.refresh(log_callback,status_callback,current_pressure_callback,current_force_callback)
 
     def refresh(self,log_callback,status_callback,current_pressure_callback,current_force_callback):
-        self.funADC = ADC() # instantiate ADC class
+        self.funADC = ADC(log_callback=log_callback,
+                          current_lc_voltage_callback=None,
+                          current_force_callback=None) # instantiate ADC class
         self.log = log_callback # define log attribute
         self.status = status_callback # define status attribute
         self.current_pressure = current_pressure_callback # define pressure attribute
@@ -359,7 +374,9 @@ class LVDT():
 
     def refresh(self,log_callback,status_callback,current_position_callback,current_voltage_callback):
         #live_plot_callback
-        self.funADC = ADC() #initializes function instance of ADC class
+        self.funADC = ADC(log_callback=log_callback,
+                          current_lc_voltage_callback=None,
+                          current_force_callback=None) #initializes function instance of ADC class
         self.log = log_callback # create log attribute
         self.status = status_callback # create status attribute
         self.current_position = current_position_callback
@@ -677,7 +694,9 @@ class test():
         # ===== Instantiate Classes =====
         self.funDAC = DAC(log_callback=log_callback,
                           status_callback=None) #creates instance of DAC class internal to "test" function
-        self.funADC = ADC() #creates instance of ADC class internal to "test" function
+        self.funADC = ADC(log_callback=log_callback,
+                          current_lc_voltage_callback=None,
+                          current_force_callback=None) #creates instance of ADC class internal to "test" function
         self.funPT = PT(log_callback=log_callback,
                         status_callback=None,
                         current_pressure_callback=None,
@@ -866,7 +885,7 @@ class test():
                 self.force_data[i] = self.funADC.readForce() # get current force
                 self.displacement_data[i] = self.funLVDT.measure(callback=False) # measure displacement
                 temperature = self.funTCamp.measure() # measure all four temperatures
-                 self.temp1[i] = temperature[0] # assign temp 1
+                self.temp1[i] = temperature[0] # assign temp 1
                 self.temp2[i] = temperature[1] # assign temp 2
                 self.temp3[i] = temperature[2] # assign temp 3
                 self.temp4[i] = temperature[3] # assign temp 4
