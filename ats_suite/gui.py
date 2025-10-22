@@ -816,7 +816,7 @@ class GUI:
             tk.Entry(self.param_frame_calibration_tab,textvariable=self.LVDT_cal_zero_tk,state='readonly').grid(row=2,column=1,sticky='w') # display zero offset
             tk.Label(self.param_frame_calibration_tab,text='Standard Deviation (inches):').grid(row=3,column=0,sticky='e') # create standard deviation label
             tk.Entry(self.param_frame_calibration_tab,textvariable=self.LVDT_cal_std_dev_tk,state='readonly').grid(row=3,column=1,sticky='w') # display standard deviation
-            tk.Label(self.param_frame_calibration_tab,text='Linearity (%FSO):').grid(row=4,column=0,sticky='e') # create linearity label
+            tk.Label(self.param_frame_calibration_tab,text='Linearity (+/- %FSO):').grid(row=4,column=0,sticky='e') # create linearity label
             tk.Entry(self.param_frame_calibration_tab,textvariable=self.LVDT_cal_linearity_tk,state='readonly').grid(row=4,column=1,sticky='w') # display linearity
             tk.Label(self.param_frame_calibration_tab,text='R\u00b2:').grid(row=5,column=0,sticky='e') # create R^2 lable
             tk.Entry(self.param_frame_calibration_tab,textvariable=self.LVDT_cal_R2_tk,state='readonly').grid(row=5,column=1,sticky='w') # display R2 value
@@ -832,11 +832,11 @@ class GUI:
             # ===== Populate Statistics =====
             tk.Label(self.param_frame_calibration_tab,text='Calibration Factor (psi/count):').grid(row=2,column=0,sticky='e') # create cal factor label
             tk.Entry(self.param_frame_calibration_tab,textvariable=self.PT_cal_factor_tk,state='readonly').grid(row=2,column=1,sticky='w') # display calibration factor
-            tk.Label(self.param_frame_calibration_tab,text="Zero Offset (psi):").grid(row=3,column=0,sticky='e') # create zero offset label
+            tk.Label(self.param_frame_calibration_tab,text="Zero Offset (counts):").grid(row=3,column=0,sticky='e') # create zero offset label
             tk.Entry(self.param_frame_calibration_tab,textvariable=self.PT_cal_zero_tk,state='readonly').grid(row=3,column=1,sticky='w') # display zero offset
             tk.Label(self.param_frame_calibration_tab,text='Standard Deviation (psi):').grid(row=4,column=0,sticky='e') # create standard deviation label
             tk.Entry(self.param_frame_calibration_tab,textvariable=self.PT_cal_std_dev_tk,state='readonly').grid(row=4,column=1,sticky='w') # display standard deviation
-            tk.Label(self.param_frame_calibration_tab,text='Linearity (%FSO):').grid(row=5,column=0,sticky='e') # create linearity label
+            tk.Label(self.param_frame_calibration_tab,text='Linearity (+/- %FSO):').grid(row=5,column=0,sticky='e') # create linearity label
             tk.Entry(self.param_frame_calibration_tab,textvariable=self.PT_cal_linearity_tk,state='readonly').grid(row=5,column=1,sticky='w') # display linearity
             tk.Label(self.param_frame_calibration_tab,text='R\u00b2:').grid(row=6,column=0,sticky='e') # create R^2 lable
             tk.Entry(self.param_frame_calibration_tab,textvariable=self.PT_cal_R2_tk,state='readonly').grid(row=6,column=1,sticky='w') # display R2 value
@@ -856,7 +856,7 @@ class GUI:
             tk.Entry(self.param_frame_calibration_tab,textvariable=self.IP_cal_zero_tk,state='readonly').grid(row=3,column=1,sticky='w') # display zero offset
             tk.Label(self.param_frame_calibration_tab,text='Standard Deviation (psi):').grid(row=4,column=0,sticky='e') # create standard deviation label
             tk.Entry(self.param_frame_calibration_tab,textvariable=self.IP_cal_std_dev_tk,state='readonly').grid(row=4,column=1,sticky='w') # display standard deviation
-            tk.Label(self.param_frame_calibration_tab,text='Linearity (%FSO):').grid(row=5,column=0,sticky='e') # create linearity label
+            tk.Label(self.param_frame_calibration_tab,text='Linearity (+/- %FSO):').grid(row=5,column=0,sticky='e') # create linearity label
             tk.Entry(self.param_frame_calibration_tab,textvariable=self.IP_cal_linearity_tk,state='readonly').grid(row=5,column=1,sticky='w') # display linearity
             tk.Label(self.param_frame_calibration_tab,text='R\u00b2:').grid(row=6,column=0,sticky='e') # create R^2 lable
             tk.Entry(self.param_frame_calibration_tab,textvariable=self.IP_cal_R2_tk,state='readonly').grid(row=6,column=1,sticky='w') # display R2 value
