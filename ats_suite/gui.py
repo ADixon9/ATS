@@ -1856,11 +1856,9 @@ class GUI:
     def on_IP_cal_method_checkbutton(self,event=None):
         button_width=18
         if self.IP_measure_method_use_external_gauge.get()==True: # box checked - measure pressure manually
-            self.log_command("true")
             self.IP_measured_pressure_entry.configure(state='normal') # enable measured pressure entry if measuring externally
             self.IP_record_button = tk.Button(self.param_frame_calibration_tab,command=lambda: (self.IP_calibration_call(input_pressure=self.IP_cal_input_pressure_tk.get(),output_pressure=self.IP_cal_output_pressure_tk.get(),measurement_method_external=True)),text='Record Measurement',width=button_width) # create record button for calibration
         elif self.IP_measure_method_use_external_gauge.get()==False: # box unchecked - measure presure with PT
-            self.log_command("false")
             self.IP_measured_pressure_entry.configure(state='disabled') # disable measured pressure entry if using transducer
             self.IP_record_button = tk.Button(self.param_frame_calibration_tab,command=lambda: (self.IP_calibration_call(input_pressure=self.IP_cal_input_pressure_tk.get(),output_pressure=False,measurement_method_external=False)),text='Record Measurement',width=button_width) # create record button for calibration
         self.IP_record_button.grid(row=1,column=2,sticky='w') # layout button
