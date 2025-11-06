@@ -188,3 +188,4 @@ ats_suite/LVDT_calibration_log.csv
 ats_suite/IP_calibration_log.csv
 ats_suite/PT_calibration_log.csv
 ats_suite/frame_compliance_log.csv
+ats_suite/plot_tool.py

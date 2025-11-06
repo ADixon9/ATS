@@ -17,7 +17,10 @@ class solver():
             data = pd.read_csv(path,sep=r'\s+',header=None,names=["force",'pressure','displacement','setpoint','control','temp1','temp2','temp3','temp4','time']) # load old file type
         self.force = data['force'].to_numpy() # define force, convert to numpy array
         self.displacement = data['displacement'].to_numpy() # define displacement, convert to numpy array
-        os.chdir(base_dir) # change working directory to base directory
+        if base_dir==None: # if a base directory hasn't been selected
+            pass
+        else:
+            os.chdir(base_dir) # change working directory to base directory
         try:
             df = pd.read_csv("frame_compliance_log.csv") # read frame compliance log
             self.frame_displacement_function = df['slope'].to_numpy()[-1] # get latest frame displacement function
@@ -76,7 +79,7 @@ class solver():
         return area
 
     def calculate_elastic_deformation(self,elastic_modulus,max_load):
-        specimen_elastic_deformation_slope = 7.06414*(10**-6) # specimen displacement as a function of load P04(5) - modeled in abaqus
+        specimen_elastic_deformation_slope = 6.49212*(10**-6)#7.06414*(10**-6) # specimen displacement as a function of load P04(5) - modeled in abaqus - VERIFIED 8/6/25 ITS CORRECT
         #update later to use FEA - REPLACES calculate_dl
         return specimen_elastic_deformation_slope
 
@@ -118,7 +121,7 @@ class solver():
         p2 = 1.25 # end of radial section
         p3 = 1.3125 # end of constant width tab section
         p4 = 1.40625 # center of pin-hole
-        num_points = 500000 # number of points used in riemann sum calculation in each section
+        num_points = 750000 # number of points used in riemann sum calculation in each section
 
         # ===== Section 4: Pin-Hole Section =====
         L_PH = (p4-p3)/num_points # length increment of Pin-Hole Section - 'initial length' term in displacement formula
@@ -154,6 +157,7 @@ class solver():
         specimen_displacement = UTS_displacement-frame_displacement # isolate specimen displacement from LVDT measured displacement by subtracting frame displacement
 
         U_E_TTL = (U_PH_E_TTL+U_TB_E_TTL+U_RD_E_TTL+U_G_E_TTL) # total elastic deformation from all four sections #
+        print(f"total elastic deformation {U_E_TTL}")
         #U_E_TTL = (U_PH_E_TTL+U_TB_E_TTL+U_RD_E_TTL) # total elastic deformation from all four sections minus the gauge
         U_G_TTL = specimen_displacement-(2*(U_E_TTL+U_4_2_P_TTL)) # total specimen displacement @ UTS minus plastic deformation outside gauge minus total elastic deformation
         '''
@@ -180,5 +184,5 @@ class solver():
         # print(f"Strain at UTS = {UTS_strain*100:.2f}%")
         return UTS_strain
     
-# test = solver(path="P04(5)_LE7.txt",log_callback=None)
-# test.calculate_dL(thickness=.125,g_width=.125,t_width=.656,D1=.1875,E=17119000,gauge_length=.5625,hole2mark_initial=1.1282,hole2mark_final=1.21935)
+#test = solver(path="P04(5)_LE7.txt",log_callback=None,base_dir=None)
+#test.calculate_dL(thickness=.125,g_width=.125,t_width=.656,D1=.1875,E=17119000,gauge_length=.5625,hole2mark_initial=1.1282,hole2mark_final=1.21935)

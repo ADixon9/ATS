@@ -13,6 +13,9 @@ from solver import *
 from scipy.signal import savgol_filter
 from sklearn.linear_model import LinearRegression
 import shutil
+
+#from trash_clone import *
+
 bus = smbus3.SMBus(1) #creates an object to communicate over i2c with smbus
 
 
@@ -305,15 +308,9 @@ class TCamp():
         for i in range(len(addr)):
             bus.write_byte_data(addr[i],config_register,resolution)#writing to device configuration register, 18-bit nominal resolution
             time.sleep(t)
-        # for i in range(len(addr)):
-        #     bus.write_byte(addr[i],resolution)#writing 18-bit nominal resolution to configuration register
-        #     time.sleep(t)
         for i in range(len(addr)):
             bus.write_byte_data(addr[i],TC_config_register,TC_type)#writing to TC configuration register, S-Type TC, filter off
             time.sleep(t)
-        # for i in range(len(addr)):
-        #     bus.write_byte(addr[i],TC_type)#writing S-type TC, filter off
-        #     time.sleep(t)
 
     def measure(self,channel1=True,channel2=True,channel3=True,channel4=True):
         '''
@@ -429,11 +426,12 @@ class MUX():
 
     def __init__(self):
         self.refresh()
+        a=1
 
     def refresh(self):
         ''' default address is 0x70'''
         self.address = 0x70
-        self.open_channels # open channels on startup
+        self.open_channels() # open channels on startup
 
     def open_channels(self,):
 

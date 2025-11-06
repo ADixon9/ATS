@@ -24,6 +24,7 @@ class analyize():
                  CH_hole2mark_final,
                  AC_hole2mark_final,
                  base_dir,
+                 test_type,
                  log_callback):
         '''
         DEFINITIONS:
@@ -45,6 +46,7 @@ class analyize():
         self.g_width = g_width
         self.t_width = t_width
         self.x_section_area = g_width*thickness # calculate specimen cross-sectional area
+        self.test_type = test_type # define test type (i.e modulus check, tensile, creep, etc)
         self.base_dir = base_dir # set base directory attribute
         try:
             self.D1 = D1
@@ -72,12 +74,13 @@ class analyize():
         self.force = self.data['force'].to_numpy() # pull force data from file, convert to numpy array
         self.stress = self.force/self.x_section_area #calculate stress
         self.displacement = self.data['displacement'].to_numpy() # pull displacement data from file, convert to numpy array
+        self.time_ = self.data['time_'].to_numpy()
         self.extensometer_voltage = self.data['temp1'].to_numpy() # get extensometer voltage
         os.chdir(self.base_dir) # set working directory back to base directory after opening data file
 
     def calculate_elastic_modulus(self):
         # ===== Define Strain =====
-        R = .2970920099 #ratio of gauge 9/16" displacement to pin displacement - update 6/30/25
+        R = .323748#.2970920099 #ratio of gauge 9/16" displacement to pin displacement - update 8/6/25 (THIS IS CORRECT)
         frame_displacement = (self.frame_displacement_function*self.force)#+self.frame_displacement_function_zero # frame displacement function
         self.specimen_displacement = self.displacement-frame_displacement # calculate specimen displacement
         self.elastic_gauge_displacement = R*self.specimen_displacement # 9/16" gauge displacement
@@ -123,26 +126,30 @@ class analyize():
         return self.elastic_modulus,best_start,best_end
 
     def elastic_conversion(self):
-        linear_fit_y = (self.elastic_modulus*self.elastic_gauge_strain)-self.stress[0] # linear fit elastic region
-        res = abs(self.stress-linear_fit_y) # calculate residuals of force and linear fit
-        standard_dev = np.std(res[self.model_start:self.model_end]) # calculate standard deviation within best fit window
-        #plt.plot(self.elastic_gauge_strain,self.stress)
-        #plt.plot(self.elastic_gauge_strain[0:3000],linear_fit_y[0:3000])
-        #plt.show()
-        a = 0 # counter
-        ''' ADJUST LATER IF NECESSARY - FINE TUNE STD DEV REQUIREMENT'''
-        for i in range(self.model_start,len(self.force)):
-            if res[i]<=(3*standard_dev):
-                self.yield_index = i#+1 # define yield index
-                a=0
-            a += 1 # increase counter
-            if a>=1000: # if yield index doesnt update in 1000 points
-                break
-                #self.yield_index = len(self.stress)#+1 # define yield index as the last index
-        print(f"yield index {self.yield_index}")
-        print(f"True yield strength = {self.stress[self.yield_index]}")
-        ''' elastic values will need joined with plastic values before returning to save data for tensile'''
-        return self.stress[:self.yield_index], self.elastic_gauge_strain[:self.yield_index]
+        self.yield_index = self.model_end # yield index is the end point of linear regressions model
+        # linear_fit_y = (self.elastic_modulus*self.elastic_gauge_strain)-self.stress[0] # linear fit elastic region
+        # res = abs(self.stress-linear_fit_y) # calculate residuals of force and linear fit
+        # standard_dev = np.std(res[self.model_start:self.model_end]) # calculate standard deviation within best fit window
+        # #plt.plot(self.elastic_gauge_strain,self.stress)
+        # #plt.plot(self.elastic_gauge_strain[0:3000],linear_fit_y[0:3000])
+        # #plt.show()
+        # a = 0 # counter
+        # ''' ADJUST LATER IF NECESSARY - FINE TUNE STD DEV REQUIREMENT'''
+        # for i in range(self.model_start,len(self.force)):
+        #     if res[i]<=(3*standard_dev):
+        #         self.yield_index = i#+1 # define yield index
+        #         a=0
+        #     a += 1 # increase counter
+        #     if a>=1000: # if yield index doesnt update in 1000 points
+        #         break
+        #         #self.yield_index = len(self.stress)#+1 # define yield index as the last index
+        # #print(f"yield index {self.yield_index}")
+        # #print(f"True yield strength = {self.stress[self.yield_index]}")
+        # ''' elastic values will need joined with plastic values before returning to save data for tensile'''
+        if self.test_type=="Modulus Check":
+            return self.stress,self.elastic_gauge_strain
+        if self.test_type=='Tensile':
+            return self.stress[:self.yield_index], self.elastic_gauge_strain[:self.yield_index]
         
     def plastic_conversion(self):
         # ===== Calculate Plastic Strain
@@ -192,15 +199,20 @@ class analyize():
         self.plastic_conversion() # run plastic strain conversion last
         return self.stress,self.strain,self.elastic_modulus,self.yield_stress,self.offset_yield_stress,self.UTS,self.UTS_strain
 
-    def extensometer_conversion(self,cal_factor,save_data=False):
+    def extensometer_conversion(self,cal_factor,zero_disp_voltage,save_data=False):
         cal_factor_inches = cal_factor/25.4 # convert mm/V to in/V
-        initial_gauge_length = (.5-(2/25.4))+self.extensometer_voltage[0]*cal_factor_inches # .5" gauge length minus 2mm offset plus starting offset
+        #initial_gauge_length = (.5-(2/25.4))+(self.extensometer_voltage[0]*cal_factor_inches) # .5" gauge length minus 2mm offset plus starting offset
+        initial_gauge_length = (.5-((zero_disp_voltage-self.extensometer_voltage[0])*cal_factor_inches)) # .5" gauge length minus 2mm offset plus starting offset
         extensometer_displacement = (self.extensometer_voltage-self.extensometer_voltage[0])*cal_factor_inches # calculate displacement
         extensometer_strain = extensometer_displacement/initial_gauge_length # calculate strain
-        self.data['temp1'] = extensometer_strain # replace voltage data with strain data
+        self.data['temp2'] = extensometer_strain # replace voltage data with strain data
+        self.data['temp3'] = extensometer_displacement
         adjusted_stress = self.stress-self.stress[0]
-        mod = np.polyfit(extensometer_strain,adjusted_stress,deg=1)[0]
+        mod = np.polyfit(extensometer_strain[:self.model_end],adjusted_stress[:self.model_end],deg=1)[0]
         print(f"Elastic modulus extensometer = {mod*(10**-6)}")
+        plt.plot(extensometer_strain,adjusted_stress)
+        plt.scatter(extensometer_strain[self.model_end],adjusted_stress[self.model_end],color='red')
+        plt.show()
         if save_data==True:
             self.data.to_csv(self.path,index=False)
         else:

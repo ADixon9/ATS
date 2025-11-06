@@ -77,6 +77,7 @@ priority: [1] - highest, [4] - lowest
 -[2] stress strain axis limits when pressing home on analysis plot is off
 -[1] add a voltage measurement to functions tab - this will be used to determine where the LVDT position lies in its range
 -[4] allow user to set default values for entries (i.e. kp, stroke rate, etc)
+-[1] analysis will intermitently not allow the user to export data, only selects the file path
 
 
 '''
@@ -744,6 +745,7 @@ class GUI:
         # ----- Plotting -----
         # ----- Create Force vs Displacement (fd) Plot -----
         self.tuning_fd_fig, self.tuning_fd_ax = plt.subplots()
+        self.tuning_fd_ax2 = self.tuning_fd_ax.twinx() # get twin axes (two y axis)
         self.tuning_fd_fig.tight_layout(rect=(0, 0.05, 1, 1))
         # ----- Embed Plot Using FigureCanvasTkAgg -----
         self.tuning_fd_plot = FigureCanvasTkAgg(self.tuning_fd_fig,master=bottom_frame) # Embed Plot
@@ -945,6 +947,7 @@ class GUI:
                                 CH_hole2mark_final=None,
                                 AC_hole2mark_final=None,
                                 base_dir=self.base_dir,
+                                test_type='Modulus Check',
                                 log_callback=self.log_command)
             self.log_command("Analysis started...") # log start of data analysis
             funAnalyze.read_data() # read data from file
@@ -975,6 +978,7 @@ class GUI:
                                 CH_hole2mark_final=self.CH_hole2mark_final_tk.get(),
                                 AC_hole2mark_final=self.AC_hole2mark_final_tk.get(),
                                 base_dir=self.base_dir,
+                                test_type='Tensile',
                                 log_callback=self.log_command)
             self.log_command("Analysis started...") # log start of data analysis
             # ===== Run Analysis =====
@@ -1306,8 +1310,8 @@ class GUI:
             displacement = data['displacement'].to_numpy() # convert data frame to numpy array
             self.pretest_fd_ax.cla() # clear old data
             self.pretest_fd_ax.plot(displacement,force,color='r') # plot x and y data
-            self.pretest_fd_ax.set_ylim(0,np.max(force)+50) # set y limits
-            self.pretest_fd_ax.set_xlim(0,np.max(displacement)+.01) # set x limits
+            #self.pretest_fd_ax.set_ylim(0,np.max(force)+50) # set y limits
+            #self.pretest_fd_ax.set_xlim(0,np.max(displacement)+.01) # set x limits
             self.pretest_fd_ax.set_title('Modulus Check') # set title
             self.pretest_fd_ax.set_ylabel('Force (lb)') # set y label
             self.pretest_fd_ax.set_xlabel('Displacement (in)') # set x label
@@ -1337,16 +1341,22 @@ class GUI:
             # ----- Plot Raw Data (force vs. displacement) -----
             data = pd.read_csv(file_path) # data frame
             displacement = data['displacement'].to_numpy() # convert data frame to numpy array
+            control = data['control'].to_numpy() # get PID control values
             time = data['time_'].to_numpy() # convert data frame to numpy array
             force = data['force'].to_numpy()[-1] # get last force value
             self.force_label_tuning_tab_tk.set(force) # set current force value
             self.tuning_fd_ax.cla() # clear old data
-            self.tuning_fd_ax.plot(time,displacement,color='r') # plot x and y data
+            dt, = self.tuning_fd_ax.plot(time,displacement,color='r',label='LVDT') # plot x and y data
+            self.tuning_fd_ax2.cla() # clear old data
+            ct, = self.tuning_fd_ax2.plot(time,control,color='b',label='Control') # plot control vs time
+            self.tuning_fd_ax2.set_ylabel('Pressure (psi)')
+            self.tuning_fd_ax2.yaxis.set_label_position('right')
             self.tuning_fd_ax.set_ylim(0,np.max(displacement)+.001) # set y limits
             self.tuning_fd_ax.set_xlim(0,np.max(time)+2) # set x limits
             self.tuning_fd_ax.set_title('Stroke Rate Tuning') # set title
             self.tuning_fd_ax.set_ylabel('Displacement(in)') # set y label
             self.tuning_fd_ax.set_xlabel('Time(s)') # set x label
+            self.tuning_fd_ax.legend([dt,ct],[dt.get_label(),ct.get_label()],loc='upper left') # enable legend
             self.tuning_fd_plot.draw_idle() # redraw canvas
             self.log_command('Tuning data plotted succesfully...') # log tensile test plotting
 
@@ -1359,6 +1369,7 @@ class GUI:
                         "Displacement":       "displacement",
                         "Time":               "time_",
                         "Setpoint":           "setpoint",
+                        "Control":            "control",
                         "Temperature (CH1)":  "temp1",
                         "Temperature (CH2)":  "temp2",
                         "Temperature (CH3)":  "temp3",
@@ -1759,6 +1770,7 @@ class GUI:
                             'Strain',
                             "Time",
                             "Setpoint",
+                            "Control",
                             "Temperature (CH1)",
                             "Temperature (CH2)",
                             "Temperature (CH3)",
@@ -1776,6 +1788,7 @@ class GUI:
                             'Strain',
                             "Time",
                             "Setpoint",
+                            "Control",
                             "Temperature (CH1)",
                             "Temperature (CH2)",
                             "Temperature (CH3)",
@@ -2087,15 +2100,14 @@ class GUI:
         new_path = os.path.join(self.folder_path.get(),self.file_name_analysis_tab_tk.get()+'.csv') # get complete file path
         df = pd.read_csv(loaded_data) # read csv file
         if method=='Modulus Check':
-            try:
-                df.insert(0,'stress',self.elastic_stress) # insert stress column at the begining
-                df.insert(1,'strain',self.elastic_strain) # insert strain column in front of stress column
-            except ValueError: # stress/strain already exists
-                df.drop('stress',axis=1) # delete existing stress column
-                df.drop('strain',axis=1) # delete existing strain column
-                df.insert(0,'stress',self.elastic_stress) # insert stress column at the begining
-                df.insert(1,'strain',self.elastic_strain) # insert strain column in front of stress column
-            pass
+            #try:
+            df.insert(0,'stress',self.elastic_stress) # insert stress column at the begining
+            df.insert(1,'strain',self.elastic_strain) # insert strain column in front of stress column
+            # except ValueError: # stress/strain already exists
+            #     df.drop('stress',axis=1) # delete existing stress column
+            #     df.drop('strain',axis=1) # delete existing strain column
+            #     df.insert(0,'stress',self.elastic_stress) # insert stress column at the begining
+            #     df.insert(1,'strain',self.elastic_strain) # insert strain column in front of stress column
         elif method=='Tensile':
             try:
                 df.insert(0,'stress',self.stress) # insert stress column at the begining
