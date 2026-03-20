@@ -49,17 +49,27 @@ class ADC(): #ADS1115 Chip
             config = [0b01100000,0b11100011] # config for strain measurement, changes differential to single ended input
         elif device=="extensometer":
             config = [0b01110000,0b11100011]
+        elif device=='load_cell':
+            config = [0b00000000,0b11100011] # see pg 18 of ADS1115 data sheet to change configuration. This configuration is set to standard operation, continuous conversion, 860SPS, AIN0 = +, AIN1 = - (differential)
+        elif device=='extensometer_differential':
+            config = [0b00110000,0b11100011] # see pg 18 of ADS1115 data sheet to change configuration. This configuration is set to standard operation, continuous conversion, 860SPS, AIN2 = +, AIN3 = - (differential)
         else:
             print("ERROR: ADC input device not recognized...")
         bus.write_i2c_block_data(self.address,config_register,config) # write configuration to configuration register
         time.sleep(1/520) # wait for configuration to activate
 
-
     def readVoltage(self,device):
         self.config(device) # configure ADC to read from selected device
         rawData = bus.read_i2c_block_data(self.address,0b00000000,2) ## Reads binary 16-bit voltage value from conversion register
         myCodevalue = (rawData[0]<<8 | rawData[1]) ## (<<8 is pushing the first byte 8 bits to the left to position the first byte)(MSB is +/- sign, reads 0 since only +)
-        voltage = (5*myCodevalue)/26715 # calibrated to read 5v out with a 5v input. Verified using a fluke multimeter. ideal value is 32767
+        if device=='extensometer':
+            voltage = (myCodevalue*.0001876007)+.006428097# value calibrated using precision calibrator - used to read load cell - valid within .0001V
+        elif device=='loadcell':
+            voltage = (myCodevalue*.00018762980320422514)+.0003790489436818289
+        elif device=='extensometer_differential':
+            voltage = (myCodevalue*.000186476137182283)+.007327621936700868
+        else:
+            voltage = (5*myCodevalue)/26715 # calibrated to read 5v out with a 5v input. Verified using a fluke multimeter. ideal value is 32767
         return float("%.4f" % voltage) ## formats to three decimal places. (.3f means 3 decimals, (f) float)
     
     def readRaw(self,device):
@@ -254,7 +264,7 @@ class PT():
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cal_curve = np.polyfit(raw_data,pressure_data,1) # linear curve fit degree 1.
         self.slope = cal_curve[0]
-        self.zero = cal_curve[1] # zero point
+        self.zero = round(cal_curve[1],6) # zero point (bits)
         df = pd.DataFrame({'date':[timestamp],'slope':[self.slope],'zero':[self.zero]}) # create data frame with these values
         write_header = not os.path.exists('PT_calibration_log.csv') # check to see if the file exists, if so, define as false
         df.to_csv('PT_calibration_log.csv',mode='a',header=write_header,index=False) # append data frame to csv
@@ -729,6 +739,112 @@ class test():
         df.to_csv('FC_test_aggregate.csv',mode='a',header=write_header,index=False) # append data frame to csv
         self.log("Compliance test complete...")
 
+    # def MODcheck(self,maxload,load_rate,file_path,status_callback="default"):
+    #     funDAQ = DAQ(file_path=file_path,log_data_save_callback=None) # instantiate DAQ class
+    #     # ===== Calculate Number of Data Points To Be Collected ======
+    #     n = 0 # loop counter
+    #     step_size_psi = .01 # set step size in psi
+    #     piston_area = 26.79 # define the area of the piston for force calculation
+    #     max_pressure = 2*(maxload/piston_area) # maximum load divided by the piston area - multiplied by two for setpoint array buffer
+    #     min_pressure = 3 # define minimum pressure
+    #     num_points =  round((max_pressure-min_pressure)/(2*step_size_psi))# calculate the total number of points to be collected (pressure range/step size) - divide by 2 to keep step size the same given the buffer
+    #     pressure_setpoint_array = np.linspace(3,max_pressure,num_points) # pressure setpoint array from min to max load in PSI
+    #     total_test_time = maxload/load_rate # calculate total test time in seconds
+    #     time_interval = total_test_time/num_points # calculate expected time interval
+    #     start_time = time.time() # get start time
+    #     while True:
+    #         for i in range(self.buffer_size):
+    #             current_time = time.time() # get current time
+    #             # ===== Read Data =====
+    #             self.pressure_data[i] = self.funPT.readPSI(callback=False) # get current pressure
+    #             self.force_data[i] = self.pressure_data[i]*piston_area # pressure*area=force
+    #             self.displacement_data[i] = self.funLVDT.measure(callback=False) # get current displacement
+    #             temperature = self.funTCamp.measure() # measure all four temperatures
+    #             self.strain_data[i] = self.funADC.readVoltage(device='extensometer')
+    #             #self.temp1[i] = temperature[0] # assign temp 1
+    #             self.temp2[i] = temperature[1] # assign temp 2
+    #             self.temp3[i] = temperature[2] # assign temp 3
+    #             self.temp4[i] = temperature[3] # assign temp 4
+    #             self.time_array[i] = current_time-start_time # assign time elapsed
+    #             self.funDAC.writePSI(pressure_setpoint_array[i+(self.buffer_size*n)]) # write pressure accounting for loop itterations
+    #             # ===== End Test If Max Load Is Reached =====
+    #             if self.force_data[i]>=maxload or self.stop_event==True: # if maxload is reached or stop event is triggered, end test
+    #                 self.funDAC.writePSI(3)
+    #                 # assign empty variables with length of current array - AVOIDS SAVING DATA WITH UNFILLED ZEROS
+    #                 temp_force = np.zeros(i) 
+    #                 temp_pressure = np.zeros(i)
+    #                 temp_displacement = np.zeros(i)
+    #                 temp_setpoint_array = np.zeros(i)
+    #                 temp_control_array = np.zeros(i)
+    #                 temp_temp1 = np.zeros(i)
+    #                 temp_temp2 = np.zeros(i)
+    #                 temp_temp3 = np.zeros(i)
+    #                 temp_temp4 = np.zeros(i)
+    #                 temp_time = np.zeros(i)
+    #                 for j in range(i):# ensures remaining data outside buffer is saved
+    #                     temp_force[j] = self.force_data[j] 
+    #                     temp_pressure[j] = self.pressure_data[j]
+    #                     temp_displacement[j] = self.displacement_data[j]
+    #                     temp_setpoint_array[j] = pressure_setpoint_array[j]
+    #                     temp_control_array[j] = pressure_setpoint_array[j]
+    #                     #temp_temp1[j] = self.temp1[j]
+    #                     temp_temp1[j] = self.strain_data[j]
+    #                     temp_temp2[j] = self.temp2[j]
+    #                     temp_temp3[j] = self.temp3[j]
+    #                     temp_temp4[j] = self.temp4[j]
+    #                     temp_time[j] = self.time_array[j]
+    #                 funDAQ.save(force = temp_force,
+    #                             pressure = temp_pressure,
+    #                             displacement = temp_displacement,
+    #                             setpoint = temp_setpoint_array,
+    #                             control = temp_control_array,
+    #                             temp1 = temp_temp1,
+    #                             temp2 = temp_temp2,
+    #                             temp3 = temp_temp3,
+    #                             temp4 = temp_temp4,
+    #                             time_ = temp_time)
+    #                 self.log("Modulus Check Complete...")
+    #                 if status_callback=='default':
+    #                     self.test_status('MODcheck','default-True') # test is complete - plot on pre-test tab
+    #                 elif status_callback=='calibration':
+    #                     self.test_status('MODcheck','calibration-True') # test is complete - plot on calibration tab
+    #                 elif status_callback=='None':
+    #                     pass
+    #                 # if self.is_FC_running==True:
+    #                 #     pass # stop event is reset inside frame compliance method
+    #                 # else:
+    #                 #     self.stop_event = False # reset stop event
+    #                 return # break out of the function while keeping GUI running
+    #             else:
+    #                 pass
+    #             # ===== Wait To Continue =====
+    #             while True:
+    #                 temp_time = time.time()
+    #                 time_elapsed = temp_time-current_time # 
+    #                 if time_elapsed >= time_interval: # if time elapsed is equal to or greater than time interval
+    #                     break # break out of loop
+    #                 else:
+    #                     pass
+    #         # ===== End of For Loop - Save Data =====
+    #         n += 1 # increase loop counter
+    #         funDAQ.save(force = self.force_data,
+    #                     pressure = self.pressure_data,
+    #                     displacement = self.displacement_data,
+    #                     setpoint = pressure_setpoint_array[-self.buffer_size:],
+    #                     control = pressure_setpoint_array[-self.buffer_size:],
+    #                     #temp1 = self.temp1,
+    #                     temp1 = self.strain_data,
+    #                     temp2 = self.temp2,
+    #                     temp3 = self.temp3,
+    #                     temp4 = self.temp4,
+    #                     time_ = self.time_array)
+    #         if status_callback=='default':
+    #             self.test_status('MODcheck','default-updated') # test status is 'updated' - data saved - plot on pre-test tab
+    #         elif status_callback=='calibration':
+    #             self.test_status('MODcheck','calibration-updated') # test status is 'updated' - data saved - plot on calibration tab
+    #         elif status_callback==None:
+    #             pass
+
     def MODcheck(self,maxload,load_rate,file_path,status_callback="default"):
         funDAQ = DAQ(file_path=file_path,log_data_save_callback=None) # instantiate DAQ class
         # ===== Calculate Number of Data Points To Be Collected ======
@@ -737,6 +853,7 @@ class test():
         piston_area = 26.79 # define the area of the piston for force calculation
         max_pressure = 2*(maxload/piston_area) # maximum load divided by the piston area - multiplied by two for setpoint array buffer
         min_pressure = 3 # define minimum pressure
+        min_load = min_pressure/piston_area
         num_points =  round((max_pressure-min_pressure)/(2*step_size_psi))# calculate the total number of points to be collected (pressure range/step size) - divide by 2 to keep step size the same given the buffer
         pressure_setpoint_array = np.linspace(3,max_pressure,num_points) # pressure setpoint array from min to max load in PSI
         total_test_time = maxload/load_rate # calculate total test time in seconds
@@ -757,8 +874,143 @@ class test():
                 self.temp4[i] = temperature[3] # assign temp 4
                 self.time_array[i] = current_time-start_time # assign time elapsed
                 self.funDAC.writePSI(pressure_setpoint_array[i+(self.buffer_size*n)]) # write pressure accounting for loop itterations
+                k = i # counter
                 # ===== End Test If Max Load Is Reached =====
-                if self.force_data[i]>=maxload or self.stop_event==True: # if maxload is reached or stop event is triggered, end test
+                if self.force_data[i]>=maxload:
+                    # assign empty variables with length of current array - AVOIDS SAVING DATA WITH UNFILLED ZEROS
+                    temp_force = np.zeros(i) 
+                    temp_pressure = np.zeros(i)
+                    temp_displacement = np.zeros(i)
+                    temp_setpoint_array = np.zeros(i)
+                    temp_control_array = np.zeros(i)
+                    temp_temp1 = np.zeros(i)
+                    temp_temp2 = np.zeros(i)
+                    temp_temp3 = np.zeros(i)
+                    temp_temp4 = np.zeros(i)
+                    temp_time = np.zeros(i)
+                    for j in range(i):# ensures remaining data outside buffer is saved
+                        temp_force[j] = self.force_data[j] 
+                        temp_pressure[j] = self.pressure_data[j]
+                        temp_displacement[j] = self.displacement_data[j]
+                        temp_setpoint_array[j] = pressure_setpoint_array[j]
+                        temp_control_array[j] = pressure_setpoint_array[j]
+                        #temp_temp1[j] = self.temp1[j]
+                        temp_temp1[j] = self.strain_data[j]
+                        temp_temp2[j] = self.temp2[j]
+                        temp_temp3[j] = self.temp3[j]
+                        temp_temp4[j] = self.temp4[j]
+                        temp_time[j] = self.time_array[j]
+                    funDAQ.save(force = temp_force,
+                                pressure = temp_pressure,
+                                displacement = temp_displacement,
+                                setpoint = temp_setpoint_array,
+                                control = temp_control_array,
+                                temp1 = temp_temp1,
+                                temp2 = temp_temp2,
+                                temp3 = temp_temp3,
+                                temp4 = temp_temp4,
+                                time_ = temp_time)
+                    if status_callback=='default':
+                        self.test_status('MODcheck','default-True') # test is complete - plot on pre-test tab
+                    elif status_callback=='calibration':
+                        self.test_status('MODcheck','calibration-True') # test is complete - plot on calibration tab
+                    elif status_callback=='None':
+                        pass
+                    L = n
+                    while True:
+                        for i in range(self.buffer_size):
+                            current_time = time.time() # get current time
+                            # ===== Read Data =====
+                            self.pressure_data[i] = self.funPT.readPSI(callback=False) # get current pressure
+                            self.force_data[i] = self.pressure_data[i]*piston_area # pressure*area=force
+                            self.displacement_data[i] = self.funLVDT.measure(callback=False) # get current displacement
+                            temperature = self.funTCamp.measure() # measure all four temperatures
+                            self.strain_data[i] = self.funADC.readVoltage(device='extensometer')
+                            #self.temp1[i] = temperature[0] # assign temp 1
+                            self.temp2[i] = temperature[1] # assign temp 2
+                            self.temp3[i] = temperature[2] # assign temp 3
+                            self.temp4[i] = temperature[3] # assign temp 4
+                            self.time_array[i] = current_time-start_time # assign time elapsed
+                            if L>0:
+                                self.funDAC.writePSI(pressure_setpoint_array[-i+(self.buffer_size*L)]) # write pressure accounting for loop itterations
+                            else:
+                                pass
+                        if self.force_data[i]<=(min_load+50) or L==0 or self.stop_event==True: # if maxload is reached or stop event is triggered, end test
+                            self.funDAC.writePSI(3)
+                            # assign empty variables with length of current array - AVOIDS SAVING DATA WITH UNFILLED ZEROS
+                            temp_force = np.zeros(i) 
+                            temp_pressure = np.zeros(i)
+                            temp_displacement = np.zeros(i)
+                            temp_setpoint_array = np.zeros(i)
+                            temp_control_array = np.zeros(i)
+                            temp_temp1 = np.zeros(i)
+                            temp_temp2 = np.zeros(i)
+                            temp_temp3 = np.zeros(i)
+                            temp_temp4 = np.zeros(i)
+                            temp_time = np.zeros(i)
+                            for j in range(i):# ensures remaining data outside buffer is saved
+                                temp_force[j] = self.force_data[j] 
+                                temp_pressure[j] = self.pressure_data[j]
+                                temp_displacement[j] = self.displacement_data[j]
+                                temp_setpoint_array[j] = pressure_setpoint_array[j]
+                                temp_control_array[j] = pressure_setpoint_array[j]
+                                #temp_temp1[j] = self.temp1[j]
+                                temp_temp1[j] = self.strain_data[j]
+                                temp_temp2[j] = self.temp2[j]
+                                temp_temp3[j] = self.temp3[j]
+                                temp_temp4[j] = self.temp4[j]
+                                temp_time[j] = self.time_array[j]
+                            funDAQ.save(force = temp_force,
+                                        pressure = temp_pressure,
+                                        displacement = temp_displacement,
+                                        setpoint = temp_setpoint_array,
+                                        control = temp_control_array,
+                                        temp1 = temp_temp1,
+                                        temp2 = temp_temp2,
+                                        temp3 = temp_temp3,
+                                        temp4 = temp_temp4,
+                                        time_ = temp_time)
+                            self.log("Modulus Check Complete...")
+                            if status_callback=='default':
+                                self.test_status('MODcheck','default-True') # test is complete - plot on pre-test tab
+                            elif status_callback=='calibration':
+                                self.test_status('MODcheck','calibration-True') # test is complete - plot on calibration tab
+                            elif status_callback=='None':
+                                pass
+                            # if self.is_FC_running==True:
+                            #     pass # stop event is reset inside frame compliance method
+                            # else:
+                            #     self.stop_event = False # reset stop event
+                            return # break out of the function while keeping GUI running
+                                # ===== Wait To Continue =====
+                        while True:
+                            temp_time = time.time()
+                            time_elapsed = temp_time-current_time # 
+                            if time_elapsed >= time_interval: # if time elapsed is equal to or greater than time interval
+                                break # break out of loop
+                            else:
+                                pass
+                        # ===== End of For Loop - Save Data =====
+                        L -= 1 # increase loop counter
+                        funDAQ.save(force = self.force_data,
+                                    pressure = self.pressure_data,
+                                    displacement = self.displacement_data,
+                                    setpoint = pressure_setpoint_array[-self.buffer_size:],
+                                    control = pressure_setpoint_array[-self.buffer_size:],
+                                    #temp1 = self.temp1,
+                                    temp1 = self.strain_data,
+                                    temp2 = self.temp2,
+                                    temp3 = self.temp3,
+                                    temp4 = self.temp4,
+                                    time_ = self.time_array)
+                        if status_callback=='default':
+                            self.test_status('MODcheck','default-updated') # test status is 'updated' - data saved - plot on pre-test tab
+                        elif status_callback=='calibration':
+                            self.test_status('MODcheck','calibration-updated') # test status is 'updated' - data saved - plot on calibration tab
+                        elif status_callback==None:
+                            pass
+
+                if self.stop_event==True: # if maxload is reached or stop event is triggered, end test
                     self.funDAC.writePSI(3)
                     # assign empty variables with length of current array - AVOIDS SAVING DATA WITH UNFILLED ZEROS
                     temp_force = np.zeros(i) 

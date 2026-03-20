@@ -78,6 +78,7 @@ priority: [1] - highest, [4] - lowest
 -[1] add a voltage measurement to functions tab - this will be used to determine where the LVDT position lies in its range
 -[4] allow user to set default values for entries (i.e. kp, stroke rate, etc)
 -[1] analysis will intermitently not allow the user to export data, only selects the file path
+-[1] add a function to publish results from data analysis to an output file
 
 
 '''
@@ -467,7 +468,7 @@ class GUI:
         tk.Label(right_top_frame,text="Number of Plots:").grid(row=1,column=0,sticky='e') # create number of plots label
         self.num_plots_box_analysis_tab = ttk.Combobox(right_top_frame,
                                                        textvariable=self.number_of_analysis_plots_tk,
-                                                       values=[1,2,3,4,5,6,7,8],
+                                                       values=[1,2,3,4,5,6,7,8,9,10],
                                                        state='readonly',
                                                        width=combo_box_width) # create drop down box to select number of plots
         self.num_plots_box_analysis_tab.grid(row=1,column=1,sticky='w') # layout number of plots box

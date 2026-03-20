@@ -5,6 +5,9 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 from solver import *
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import cm
+import matplotlib as mpl
 import time
 import os
 pd.set_option('display.max_rows', None)  # Show all rows
@@ -79,14 +82,21 @@ class analyize():
         os.chdir(self.base_dir) # set working directory back to base directory after opening data file
 
     def calculate_elastic_modulus(self):
+        '''
+        Adjust code such that the linear regression runs twice:
+        -Once to find best end, then searches for best start
+        -Run again to find new best end after best start is found, bad start can skew end selection
+        '''
+        buffer = 200
+        a = 0
         # ===== Define Strain =====
-        R = .323748#.2970920099 #ratio of gauge 9/16" displacement to pin displacement - update 8/6/25 (THIS IS CORRECT)
+        R = .267729#.323748#.2970920099 #ratio of gauge 9/16" displacement to pin displacement - update 8/6/25 (.3237) - update 1/20/26 (.2677)
         frame_displacement = (self.frame_displacement_function*self.force)#+self.frame_displacement_function_zero # frame displacement function
         self.specimen_displacement = self.displacement-frame_displacement # calculate specimen displacement
         self.elastic_gauge_displacement = R*self.specimen_displacement # 9/16" gauge displacement
         self.elastic_gauge_strain = self.elastic_gauge_displacement/.5625 # dL/Li, (L-L0)/Li, L0=0
         #self.elastic_gauge_strain = self.elastic_gauge_strain-self.elastic_gauge_strain[0] # offset elastic gauge strain to be zero
-        min_points = 300 # minimum linear fit window size
+        min_points = 1000 # minimum linear fit window size
         n = len(self.displacement) # number of data points
         # ===== Find best end index starting from index 0 =====
         best_r2 = -np.inf # negative infinity
@@ -101,6 +111,13 @@ class analyize():
                 best_end = i # find index of best fit R2
             if (best_r2-r2)>=(.1*best_r2): # if current r2 is more than 10% different than best r2
                 break
+            # if (best_r2)>(r2): # if current r2 is more than 10% different than best r2
+            #     a += 1
+            #     if a>=buffer:
+            #         print(i)
+            #         break
+            # else:
+            #     a = 0
         # ===== With best end index, find best start index =====
         best_r2_final = -np.inf # negative infinity
         best_start = 0
@@ -117,12 +134,16 @@ class analyize():
         final_y =self.stress[best_start:best_end] # define final y indicies
         final_model = LinearRegression().fit(final_x.reshape(-1,1), final_y)
         temp_model=LinearRegression().fit(self.elastic_gauge_strain[-500:].reshape(-1,1),self.stress[-500:])
-        print(f"moduli {final_model.coef_[0]*(10**-6)}")
+        print(f"moduli {round(final_model.coef_[0]*(10**-6),2)}")
         print(f"start {best_start}")
         print(f"end {best_end}")
         self.elastic_modulus = final_model.coef_[0]
         self.model_start = best_start # define model_start attribute
         self.model_end = best_end # define best_end attribute
+        # plt.plot(self.displacement,self.force)
+        # plt.scatter(self.displacement[best_start],self.force[best_start])
+        # plt.scatter(self.displacement[best_end],self.force[best_end])
+        # plt.show()
         return self.elastic_modulus,best_start,best_end
 
     def elastic_conversion(self):
@@ -189,10 +210,12 @@ class analyize():
         self.yield_stress = self.stress[self.yield_index] # get true yield stress
         self.offset_yield_stress = self.stress[offset_yield_idx] # get offset yield stress
         print(self.stress[offset_yield_idx])
-        #plt.plot(self.strain,self.stress)
-        #plt.scatter(self.strain[UTS_index],self.stress[UTS_index],color='r')
-        #plt.plot(self.strain[1000:4000],offset_yield_line[1000:4000],color='b')
-        #plt.show()
+        # plt.plot(self.strain,self.stress)
+        # plt.scatter(self.strain[UTS_index],self.stress[UTS_index],color='r')
+        # plt.scatter(self.strain[self.model_end],self.stress[self.model_end],color='red')
+        # plt.scatter(self.strain[self.model_start],self.stress[self.model_start],color='red')
+        # plt.plot(self.strain[1500:(offset_yield_idx+100)],offset_yield_line[1500:(offset_yield_idx+100)],color='b')
+        # plt.show()
     
     def total_conversion(self):
         self.elastic_conversion() # run elastic strain conversion first
@@ -201,20 +224,225 @@ class analyize():
 
     def extensometer_conversion(self,cal_factor,zero_disp_voltage,save_data=False):
         cal_factor_inches = cal_factor/25.4 # convert mm/V to in/V
-        #initial_gauge_length = (.5-(2/25.4))+(self.extensometer_voltage[0]*cal_factor_inches) # .5" gauge length minus 2mm offset plus starting offset
-        initial_gauge_length = (.5-((zero_disp_voltage-self.extensometer_voltage[0])*cal_factor_inches)) # .5" gauge length minus 2mm offset plus starting offset
+        initial_gauge_length = (.5 -((zero_disp_voltage-self.extensometer_voltage[0])*cal_factor_inches)) # .5" gauge length minus 2mm offset plus starting offset
+        '''
+        NOTE
+        in initial gauge length calculation, 2/25.4 requires that the output be zero volts at exactly this given displacement (VERIFY)
+        
+        '''
+        #initial_gauge_length = (.3 -((zero_disp_voltage-self.extensometer_voltage[0])*cal_factor_inches)) # .5" gauge length minus 2mm offset plus starting offset
+        print(f"initial gauge length: {round(initial_gauge_length,4)} initial voltage = {round(self.extensometer_voltage[0],4)}")
         extensometer_displacement = (self.extensometer_voltage-self.extensometer_voltage[0])*cal_factor_inches # calculate displacement
         extensometer_strain = extensometer_displacement/initial_gauge_length # calculate strain
         self.data['temp2'] = extensometer_strain # replace voltage data with strain data
         self.data['temp3'] = extensometer_displacement
         adjusted_stress = self.stress-self.stress[0]
         mod = np.polyfit(extensometer_strain[:self.model_end],adjusted_stress[:self.model_end],deg=1)[0]
-        print(f"Elastic modulus extensometer = {mod*(10**-6)}")
+        mod2 = np.polyfit(extensometer_strain,adjusted_stress,deg=1)[0]
+        mod3 = np.polyfit(extensometer_strain[:self.model_end-300],adjusted_stress[:self.model_end-300],deg=1)[0]
+        print(f"Elastic modulus extensometer = {round(mod*(10**-6),2)}")
+        print(f"Elastic modulus extensometer partial range = {round(mod3*(10**-6),2)}")
+        print(f"Elastic modulus extensometer whole range = {round(mod2*(10**-6),2)}")
+        # plt.plot(extensometer_strain,adjusted_stress)
+        # plt.scatter(extensometer_strain[self.model_end],adjusted_stress[self.model_end],color='red')
+        # plt.scatter(extensometer_strain[self.model_end-300],adjusted_stress[self.model_end-300],color='red')
+        # plt.scatter(extensometer_strain[self.model_start],adjusted_stress[self.model_start],color='red')
+        # plt.show()
+        if save_data==True:
+            self.data.to_csv(self.path,index=False)
+        else:
+            pass
+
+    def extensometer_conversion2(self,cal_factor,zero_disp_voltage,save_data=False):
+        cal_factor_inches = cal_factor/25.4 # convert mm/V to in/V
+        #initial_gauge_length = (.5-(2/25.4))+(self.extensometer_voltage[0]*cal_factor_inches) # .5" gauge length minus 2mm offset plus starting offset
+        
+        initial_gauge_length = .5 # .5" gauge length minus 2mm offset plus starting offset
+        #initial_gauge_length = (.3 -((zero_disp_voltage-self.extensometer_voltage[0])*cal_factor_inches)) # .5" gauge length minus 2mm offset plus starting offset
+        print(f"initial gauge length: {round(initial_gauge_length,4)} initial voltage = {round(self.extensometer_voltage[0],4)}")
+        extensometer_displacement = (self.extensometer_voltage-self.extensometer_voltage[0])*cal_factor_inches # calculate displacement
+        extensometer_strain = extensometer_displacement/initial_gauge_length # calculate strain
+        self.data['temp2'] = extensometer_strain # replace voltage data with strain data
+        self.data['temp3'] = extensometer_displacement
+        adjusted_stress = self.stress-self.stress[0]
+        mod = np.polyfit(extensometer_strain[:self.model_end],adjusted_stress[:self.model_end],deg=1)[0]
+        mod2 = np.polyfit(extensometer_strain,adjusted_stress,deg=1)[0]
+        print(f"Elastic modulus extensometer = {round(mod*(10**-6),2)}")
+        print(f"Elastic modulus extensometer whole range = {round(mod2*(10**-6),2)}")
         plt.plot(extensometer_strain,adjusted_stress)
         plt.scatter(extensometer_strain[self.model_end],adjusted_stress[self.model_end],color='red')
+        plt.scatter(extensometer_strain[self.model_start],adjusted_stress[self.model_start],color='red')
         plt.show()
         if save_data==True:
             self.data.to_csv(self.path,index=False)
         else:
             pass
 
+    def force_conversion(self,save_data=False):
+        self.force = (self.extensometer_voltage*200.21989)+.26866 # cal factor generated on MTS load frame (TRUST THIS)
+        self.data['temp2'] = self.force # replace voltage data with strain data
+        if save_data==True:
+            self.data.to_csv(self.path,index=False)
+        else:
+            pass
+
+    def strain_conversion(self,save_data=False):
+        strain = (self.extensometer_voltage*5.969014608e-3) # cal factor generated on calibrator
+        E = np.polyfit(strain,self.stress,1)[0]
+        print(f"Elastic modulus strain gauge = {round(E*(10**-6),2)}")
+        self.data['temp2'] = strain # replace voltage data with strain data
+        adjusted_stress = self.stress-self.stress[0]
+        strain_adj = strain-strain[0]
+        plt.plot(strain_adj,adjusted_stress)
+        plt.show()
+        if save_data==True:
+            self.data.to_csv(self.path,index=False)
+        else:
+            pass
+
+class plot_3D():
+
+    def read_data(self,
+                  thickness,
+                  g_width,
+                  path,
+                  c_start,
+                  c_end,
+                  n_c,
+                  r_start,
+                  r_end,
+                  n_r):
+        self.thickness = thickness
+        self.g_width = g_width
+        self.x_section_area = g_width*thickness # calculate specimen cross-sectional area
+
+        self.path = path
+        self.c = np.linspace(c_start,c_end,n_c)
+        self.r = np.linspace(r_start,r_end,n_r)
+        self.n_c = n_c
+        self.n_r = n_r
+
+        '''read csv data'''
+        self.data = pd.read_csv(filepath_or_buffer=self.path)
+        self.force = self.data['force'].to_numpy() # pull force data from file, convert to numpy array
+        self.stress = self.force/self.x_section_area #calculate stress
+        self.displacement = self.data['displacement'].to_numpy() # pull displacement data from file, convert to numpy array
+        self.time_ = self.data['time_'].to_numpy()
+        self.extensometer_voltage = self.data['temp1'].to_numpy() # get extensometer voltage
+
+    def calculate_elastic_modulus(self,r,f):
+        '''
+        Adjust code such that the linear regression runs twice:
+        -Once to find best end, then searches for best start
+        -Run again to find new best end after best start is found, bad start can skew end selection
+        '''
+        buffer = 200
+        a = 0
+        # ===== Define Strain =====
+        R = r#.323748#.2970920099 #ratio of gauge 9/16" displacement to pin displacement - update 8/6/25 (.3237) - update 1/20/26 (.2677)
+        frame_displacement = (f*self.force)#+self.frame_displacement_function_zero # frame displacement function
+        self.specimen_displacement = self.displacement-frame_displacement # calculate specimen displacement
+        self.elastic_gauge_displacement = R*self.specimen_displacement # 9/16" gauge displacement
+        self.elastic_gauge_strain = self.elastic_gauge_displacement/.5625 # dL/Li, (L-L0)/Li, L0=0
+        #self.elastic_gauge_strain = self.elastic_gauge_strain-self.elastic_gauge_strain[0] # offset elastic gauge strain to be zero
+        min_points = 1000 # minimum linear fit window size
+        n = len(self.displacement) # number of data points
+        # ===== Find best end index starting from index 0 =====
+        best_r2 = -np.inf # negative infinity
+        best_end = n
+        for i in range(min_points,len(self.displacement),1):
+            x = self.displacement[:i].reshape(-1, 1) # reshape displacement for linear regression
+            y = self.force[:i] # assign force array to end value
+            model = LinearRegression().fit(x, y) # initialize model with xy data
+            r2 = r2_score(y, model.predict(x)) # score model based on r^2
+            if r2 > best_r2:
+                best_r2 = r2 # re-assign best R2
+                best_end = i # find index of best fit R2
+            if (best_r2-r2)>=(.1*best_r2): # if current r2 is more than 10% different than best r2
+                break
+            # if (best_r2)>(r2): # if current r2 is more than 10% different than best r2
+            #     a += 1
+            #     if a>=buffer:
+            #         print(i)
+            #         break
+            # else:
+            #     a = 0
+        # ===== With best end index, find best start index =====
+        best_r2_final = -np.inf # negative infinity
+        best_start = 0
+        for i in range(0, best_end - min_points + 1):
+            x = self.displacement[i:best_end].reshape(-1, 1) # reshape displacement for linear regression
+            y = self.stress[i:best_end]
+            model = LinearRegression().fit(x, y)
+            r2 = r2_score(y, model.predict(x))
+            if r2 > best_r2_final:
+                best_r2_final = r2 # re-assign best R2
+                best_start = i # find inex of best fit R2
+        # ===== Final Linear Regression =====
+        final_x = self.elastic_gauge_strain[best_start:best_end].reshape(-1,1) # define final x indicies, reshape for linear regression
+        final_y =self.stress[best_start:best_end] # define final y indicies
+        final_model = LinearRegression().fit(final_x.reshape(-1,1), final_y)
+        temp_model=LinearRegression().fit(self.elastic_gauge_strain[-500:].reshape(-1,1),self.stress[-500:])
+        #print(f"moduli {final_model.coef_[0]*(10**-6)}")
+        #print(f"start {best_start}")
+        #print(f"end {best_end}")
+        self.elastic_modulus = final_model.coef_[0]*(10**-6)
+        self.model_start = best_start # define model_start attribute
+        self.model_end = best_end # define best_end attribute
+        return self.elastic_modulus,best_start,best_end
+
+    def run_3d_plot(self,
+                    thickness,
+                    g_width,
+                    path,
+                    c_start,
+                    c_end,
+                    n_c,
+                    r_start,
+                    r_end,
+                    n_r,
+                    mod_expected):
+        sd_mod = np.zeros((n_c,n_r,len(path))) # rows,columns,deep
+        error = np.zeros((n_c,n_r,len(path))) # rows,columns,deep
+        avg_error = np.zeros((n_c,n_r,len(path))) # rows,columns,deep
+        std_dev = np.zeros((n_c,n_r,len(path))) # rows,columns,deep
+        for i in range(len(path)):
+            self.read_data(thickness=thickness[i],
+                        g_width=g_width[i],
+                        path=path[i],
+                        c_start=c_start,
+                        c_end=c_end,
+                        n_c=n_c,
+                        r_start=r_start,
+                        r_end=r_end,
+                        n_r=n_r)
+            for j in range(self.n_c):
+                for k in range(self.n_r):
+                    sd_mod[j,k,i] = self.calculate_elastic_modulus(r=self.r[k],f=self.c[j])[0]
+                    error[j,k,i] = ((sd_mod[j,k,i]-mod_expected[i])/mod_expected[i])*100
+                    print(f"R: {k}, C: {j}, Material: {i}")
+        avg_error_3d = np.mean(error,axis=2,keepdims=True)
+        avg_error = np.squeeze(avg_error_3d,axis=2)
+        std_dev_3d = np.std(error,axis=2,keepdims=True)
+        std_dev = np.squeeze(std_dev_3d,axis=2)
+        
+        x,y = np.meshgrid(self.c,self.r)
+        fig = plt.figure()
+        ax = fig.add_subplot(111,projection='3d')
+        norm = mpl.colors.Normalize(vmin=np.nanmin(avg_error),vmax=np.nanmax(avg_error))
+        cmap = plt.get_cmap('coolwarm')
+        facecolors = cmap(norm(avg_error))
+        surf = ax.plot_surface(x,y,avg_error,
+                               facecolors=facecolors,
+                               linewidth=0,
+                               shade=False,
+                               antialiased=True)
+        mappable = mpl.cm.ScalarMappable(norm=norm,cmap=cmap)
+        mappable.set_array([])
+        ax.set_xlabel('Compliance')
+        ax.set_ylabel('R')
+        ax.set_zlabel('Average Error')
+
+        fig.colorbar(mappable,ax=ax,label='Error',shrink=.6,aspect=12)
+        plt.show()
+                    
