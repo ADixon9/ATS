@@ -12,77 +12,6 @@ import threading
 import webbrowser
 from datetime import datetime
 
-'''
-To-Do List
-
-priority: [1] - highest, [4] - lowest
-
--[4] add variable units in settings tab (imperial,metric), account for this in calibrations
--[4] Add error popups for incorrect inputs
-    -tk.DoubleVar will throw a value error if a string is used
--[1] add input boxes for strain derivation into analysis tab. allow user to read and write configuration files that maintain these inputs
--[2] allow changing of buffer size in testing
--[4] include plot settings in settings tab (color, line width, line type, legend, etc)
--[4] add a setting to have live force, pressure and displacement values (change method when testing starts)
--[3] add a startup function that checks to make sure everything is connected to the pi (read all address and output "ADC Connected... DAC Connected... etc)
--[2] add a functions tab to allow user to do things such as read an individual force, pressure, position, write/read voltages, open MUX channels, read temperatures
--[3] add stop calibration button. make it restart if tab is left
--[4] add a watermark to calibration files so that you can't load calibration data from other sensors
--[3] make calibration tab plot data after calibration and when loading data file
--[3] allow calibration points to be random and not need to be in order
--[3] write an autocalibration sequence for the I/P where it will set values, wait some time, and measure the value with the pressure transducer
--[3] add read force button to pt function
--[4] autofill file name with loaded calibration data, make it read only
--[1] loading calibration files pulls current zero (LVDT Case) which is not accurate. update code to recalculate "zero" for the loaded calibration file
--[2] require a file name to be entered before testing
--[1] allow plotting of various different types under analysis tab (force vs displacement, force vs time, etc. (drop down box))
--[4] make widget sizes attributes for each tab
--[4] change enable plot labels and axes labels buttons to not rerun entire selection (takes too long)
--[3] eliminate tuning tab and add tuning method to pre-test tab
--[3] create functions to control furnace temperature, readouts,etc
--[1] update force,pressure, and position values at the top of pre-test and test
--***[1]*** Map stop button to actually stop tests
--***[1]*** Ensure calibrations are loaded immediately after completion. I believe they only load on startup (bind to tab switch)
--***[1]*** Output elastic modulus after modcheck
--***[1]*** Run plotting after running analysis
--***[1]*** Allow shifting plot in all directions (left,right,up,down) through entries
--***[1]*** standard deviation, r2 and sps is not being set in analysis tab
--***[1]*** snipping 0 on the right side makes the plot dissapear
--***[1]*** make min number of points and r2 threshold for linear regression an option in the setting menu
--***[1]*** append existing data file to add stress/strain instead of new file name
--***[1]*** format analysis output to be 4-5 floating decimals, make sure that running the test again will update values
--***[1]*** if either plot selection is stress or strain, include a button to generate data and plot a elastic modulus line, yield point, offset yield stress and UTS for given condition
--***[1]*** changing tabs will stop a test
--***[1]*** add method to reshape stress strain data to slide x and y to zero and output new data
--***[1]*** change __init__ to be a refresh function that is called under __init__. refresh system in help menu should re-run this refresh function
--[4] create montecarlo search method that changes left and right snip until the highest r^2 value is reached for FC compliance (while maintaining a minimum number of points)
--[2] shrink whitespace area of calibration tab plots similar to analysis tab plot
--[2] ON TEST STOP:
-    -clear plots on test start (will keep plot from partial test until test is complete)
-    -delete partial calibration file (wont start test because file already exists)
-    -set directory back to base directory (wont find cal data)
-    -make sure that test will start again properly
--[3] autofill axes labels depending on what the combobox selection is
--[1] get rid of browse button in pre-test tab
--[3] add plot feature to adjust y and x intercept
--[2] need to condense plotting area, not enough room when all are active
--[4] rewrite code such that it is more efficient. currently rehashing and reinstantiating classes multiple times when its unnecessary
--[4] make FC_test_aggregate include all values from tests, not just force and displacement (might be useful for plotting at a later date)
--[2] enable plot grid on all plots
--*************
--*****[1]***** Find a way to better improve frame compliance characterization - BIGGEST EFFECT ON ERROR
--*************
--[3] delete modcheck data after stopping test? (maybe)
--[2] frame compliance is plotting a flat line instead of plotting test 5
--[2] stress strain axis limits when pressing home on analysis plot is off
--[1] add a voltage measurement to functions tab - this will be used to determine where the LVDT position lies in its range
--[4] allow user to set default values for entries (i.e. kp, stroke rate, etc)
--[1] analysis will intermitently not allow the user to export data, only selects the file path
--[1] add a function to publish results from data analysis to an output file
-
-
-'''
-# Use TkAgg backend
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -267,14 +196,14 @@ class GUI:
         top_frame = tk.Frame(self.pretest_tab) # create top frame where values, entry boxes, and drop downs are housed on the test tab (notebook)
         top_frame.grid(row=0,column=0,padx=10, pady=0,sticky='ew') # size of top frame
         # ----- Force/Pressure/Displacement -----
-        tk.Label(top_frame, text="Force (Lbf):").grid(row=0, column=0, sticky="e") # create force label, sticking to right side
-        tk.Label(top_frame, textvariable=self.force_var).grid(row=0, column=1, sticky="w") # create force variable label, sticking to left side
+        # tk.Label(top_frame, text="Force (Lbf):").grid(row=0, column=0, sticky="e") # create force label, sticking to right side
+        # tk.Label(top_frame, textvariable=self.force_var).grid(row=0, column=1, sticky="w") # create force variable label, sticking to left side
 
-        tk.Label(top_frame, text="Pressure (psi):").grid(row=0, column=2, sticky="e") # create pressure label, sticking to right side
-        tk.Label(top_frame, textvariable=self.pressure_var).grid(row=0, column=3, sticky="w") # create pressure variable label, sticking to left side
+        # tk.Label(top_frame, text="Pressure (psi):").grid(row=0, column=2, sticky="e") # create pressure label, sticking to right side
+        # tk.Label(top_frame, textvariable=self.pressure_var).grid(row=0, column=3, sticky="w") # create pressure variable label, sticking to left side
 
-        tk.Label(top_frame, text="Displacement (in):").grid(row=0, column=4, sticky="e") # create displacement label, sticking to right side
-        tk.Label(top_frame, textvariable=self.displacement_var).grid(row=0, column=5, sticky="w") # create displacement variable label, sticking to left side
+        # tk.Label(top_frame, text="Displacement (in):").grid(row=0, column=4, sticky="e") # create displacement label, sticking to right side
+        # tk.Label(top_frame, textvariable=self.displacement_var).grid(row=0, column=5, sticky="w") # create displacement variable label, sticking to left side
         # ===== Controls =====
         # ----- Parameter Frame -----
         self.middle_frame_pretest = tk.Frame(self.pretest_tab) # create middle frame for test methods and start/stop buttons
@@ -346,20 +275,20 @@ class GUI:
         top_frame = tk.Frame(self.test_tab) # create top frame where values, entry boxes, and drop downs are housed on the test tab (notebook)
         top_frame.grid(row=0,column=0,padx=10, pady=0,sticky='ew') # size of top frame
         # ----- Force/Pressure/Displacement -----
-        tk.Label(top_frame, text="Force (N):").grid(row=0, column=0, sticky="e") # create force label, sticking to right side
-        tk.Label(top_frame, textvariable=self.force_var).grid(row=0, column=1, sticky="w") # create force variable label, sticking to left side
+        # tk.Label(top_frame, text="Force (N):").grid(row=0, column=0, sticky="e") # create force label, sticking to right side
+        # tk.Label(top_frame, textvariable=self.force_var).grid(row=0, column=1, sticky="w") # create force variable label, sticking to left side
 
-        tk.Label(top_frame, text="Pressure (psi):").grid(row=0, column=2, sticky="e") # create pressure label, sticking to right side
-        tk.Label(top_frame, textvariable=self.pressure_var).grid(row=0, column=3, sticky="w") # create pressure variable label, sticking to left side
+        # tk.Label(top_frame, text="Pressure (psi):").grid(row=0, column=2, sticky="e") # create pressure label, sticking to right side
+        # tk.Label(top_frame, textvariable=self.pressure_var).grid(row=0, column=3, sticky="w") # create pressure variable label, sticking to left side
 
-        tk.Label(top_frame, text="Displacement (mm):").grid(row=0, column=4, sticky="e") # create displacement label, sticking to right side
-        tk.Label(top_frame, textvariable=self.displacement_var).grid(row=0, column=5, sticky="w") # create displacement variable label, sticking to left side
+        # tk.Label(top_frame, text="Displacement (mm):").grid(row=0, column=4, sticky="e") # create displacement label, sticking to right side
+        # tk.Label(top_frame, textvariable=self.displacement_var).grid(row=0, column=5, sticky="w") # create displacement variable label, sticking to left side
         # ===== Controls =====
         self.middle_frame_test = tk.Frame(self.test_tab) # create middle frame for test methods and start/stop buttons
         self.middle_frame_test.grid(row=1,column=0,padx=10, pady=0,sticky='ew') # add padding in x and y, fill spacing in x direction
         # ----- Test Method -----
         tk.Label(self.middle_frame_test, text="Test Method:").grid(row=0, column=0, sticky="e") # create test method label, stick to the right side
-        test_options = ["Tensile", "Creep", "Fatigue"] # list drop down items under "Test Method"
+        test_options = ["Tensile"] # list drop down items under "Test Method"
         self.test_box_test_tab = ttk.Combobox(self.middle_frame_test, textvariable=self.test_method_test, values=test_options, state="readonly") # create drop-down box
         self.test_box_test_tab.grid(row=0, column=1, sticky="w") # layout drop box
         self.test_box_test_tab.bind("<<ComboboxSelected>>",self.on_selection_change_test_tab) # bind the drop down box to run selection change function
@@ -420,12 +349,6 @@ class GUI:
         cmd_frame.columnconfigure(0,weight=1)
         
     def create_analysis_tab(self):
-        '''
-        Functions to include:
-        - allow running average plotting for both axes
-        - allow the user to overlay multiple plots from both different files and different axes
-            - create drop down box that user can select number of plots they want - create a load file and axes selection for each plot - allow user to label
-        '''
         # ===== Create Frames/Labels/Buttons =====
         top_frame = tk.Frame(self.analysis_tab,bd=1,relief='solid') # create top frame where values, entry boxes, and drop downs are housed on the analysis tab (notebook)
         top_frame.grid(row=0,column=0,padx=10, pady=0,sticky='ew') # size of top frame
@@ -455,7 +378,7 @@ class GUI:
         tk.Label(left_top_frame,text="Test Type:").grid(row=1,column=0,sticky='e') # create test type label
         self.analysis_test_type_analysis_tab = ttk.Combobox(left_top_frame,
                                                             textvariable=self.analysis_test_type_analysis_tk,
-                                                            values=['Modulus Check','Tensile','Creep','Fatigue'],
+                                                            values=['Modulus Check','Tensile'],
                                                             state='readonly',
                                                             width=combo_box_width) # create drop down box to select number of plots
         self.analysis_test_type_analysis_tab.grid(row=1,column=1,sticky='w') # layout number of plots box
@@ -477,7 +400,7 @@ class GUI:
         self.num_plots_box_analysis_tab.event_generate("<<ComboboxSelected>>") # act as if the first value has been selected i.e. run the selection change function
         ''' List all plot axes and load data buttons'''
         tk.Label(right_top_frame,text="Test Type:").grid(row=2, column=0, sticky="e") # create test type label, stick to the right side
-        test_type_options = ["Modulus Check","Tensile","Creep","Fatigue"] # list drop down items under "Test Type"
+        test_type_options = ["Modulus Check","Tensile"] # list drop down items under "Test Type"
         self.test_type_box_analysis_tab = ttk.Combobox(right_top_frame,
                                                        textvariable=self.plot_test_type_analysis_tk,
                                                        values=test_type_options,
@@ -674,7 +597,7 @@ class GUI:
         tk.Button(pressure_transducer_frame,text='Measure',command=lambda: (self.funPT.readPSI(callback=True),self.funPT.readForce(callback=True)),width=button_width).grid(row=1,column=2,sticky='w') # create measure button
         tk.Label(pressure_transducer_frame,text="Zero Offset Pressure (psi):").grid(row=3,column=0,sticky='w') # create zero offset pressure label
         tk.Entry(pressure_transducer_frame,textvariable=self.PT_cal_zero_tk,state='readonly',width=entry_width).grid(row=3,column=1,sticky='w') # create zero offset pressure entry
-        tk.Button(pressure_transducer_frame,text='Set Zero Offset Pressure',command=self.PT_get_zero,width=button_width).grid(row=3,column=2,sticky='w') # create zero offset button
+        #tk.Button(pressure_transducer_frame,text='Set Zero Offset Pressure',command=self.PT_get_zero,width=button_width).grid(row=3,column=2,sticky='w') # create zero offset button
         # ===== I/P Transducer (DAC)=====
         tk.Label(ip_transducer_frame,text='I/P Transducer',font=('TkDefaultFont',12,'bold'),justify='center').grid(row=0,column=0,columnspan=3,sticky='nsew') # create header label
         tk.Label(ip_transducer_frame,text='Set Pressure (psi):').grid(row=1,column=0,sticky='w') # create set pressure label
@@ -704,14 +627,14 @@ class GUI:
         top_frame = tk.Frame(self.tuning_tab) # create top frame where values, entry boxes, and drop downs are housed on the test tab (notebook)
         top_frame.grid(row=0,column=0,padx=10, pady=0,sticky='ew') # size of top frame
         # ----- Force/Pressure/Displacement -----
-        tk.Label(top_frame, text="Force (lb):").grid(row=0, column=0, sticky="e") # create force label, sticking to right side
-        tk.Label(top_frame, textvariable=self.force_label_tuning_tab_tk).grid(row=0, column=1, sticky="w") # create force variable label, sticking to left side
+        # tk.Label(top_frame, text="Force (lb):").grid(row=0, column=0, sticky="e") # create force label, sticking to right side
+        # tk.Label(top_frame, textvariable=self.force_label_tuning_tab_tk).grid(row=0, column=1, sticky="w") # create force variable label, sticking to left side
 
-        tk.Label(top_frame, text="Pressure (psi):").grid(row=0, column=2, sticky="e") # create pressure label, sticking to right side
-        tk.Label(top_frame, textvariable=self.pressure_var).grid(row=0, column=3, sticky="w") # create pressure variable label, sticking to left side
+        # tk.Label(top_frame, text="Pressure (psi):").grid(row=0, column=2, sticky="e") # create pressure label, sticking to right side
+        # tk.Label(top_frame, textvariable=self.pressure_var).grid(row=0, column=3, sticky="w") # create pressure variable label, sticking to left side
 
-        tk.Label(top_frame, text="Displacement (in):").grid(row=0, column=4, sticky="e") # create displacement label, sticking to right side
-        tk.Label(top_frame, textvariable=self.displacement_var).grid(row=0, column=5, sticky="w") # create displacement variable label, sticking to left side
+        # tk.Label(top_frame, text="Displacement (in):").grid(row=0, column=4, sticky="e") # create displacement label, sticking to right side
+        # tk.Label(top_frame, textvariable=self.displacement_var).grid(row=0, column=5, sticky="w") # create displacement variable label, sticking to left side
         # ===== Controls =====
         self.middle_frame_tuning = tk.Frame(self.tuning_tab) # create middle frame for test methods and start/stop buttons
         self.middle_frame_tuning.grid(row=1,column=0,padx=10, pady=0,sticky='ew') # add padding in x and y, fill spacing in x direction
@@ -1311,8 +1234,6 @@ class GUI:
             displacement = data['displacement'].to_numpy() # convert data frame to numpy array
             self.pretest_fd_ax.cla() # clear old data
             self.pretest_fd_ax.plot(displacement,force,color='r') # plot x and y data
-            #self.pretest_fd_ax.set_ylim(0,np.max(force)+50) # set y limits
-            #self.pretest_fd_ax.set_xlim(0,np.max(displacement)+.01) # set x limits
             self.pretest_fd_ax.set_title('Modulus Check') # set title
             self.pretest_fd_ax.set_ylabel('Force (lb)') # set y label
             self.pretest_fd_ax.set_xlabel('Displacement (in)') # set x label
@@ -1371,13 +1292,13 @@ class GUI:
                         "Time":               "time_",
                         "Setpoint":           "setpoint",
                         "Control":            "control",
-                        "Temperature (CH1)":  "temp1",
-                        "Temperature (CH2)":  "temp2",
-                        "Temperature (CH3)":  "temp3",
-                        "Temperature (CH4)":  "temp4",
+                        #"Temperature (CH1)":  "temp1",
+                        #"Temperature (CH2)":  "temp2",
+                        #"Temperature (CH3)":  "temp3",
+                        #"Temperature (CH4)":  "temp4",
                         "Stress":             "stress",
-                        "Strain":             "strain",
-                        "Cycles":             "cycles",} # map axes to data columns
+                        "Strain":             "strain"}
+                        #"Cycles":             "cycles",} # map axes to data columns
 
         # ===== Itterate over each 
         for i, filepath in enumerate(self.plot_file_paths):
@@ -1771,16 +1692,16 @@ class GUI:
                             'Strain',
                             "Time",
                             "Setpoint",
-                            "Control",
-                            "Temperature (CH1)",
-                            "Temperature (CH2)",
-                            "Temperature (CH3)",
-                            "Temperature (CH4)",
-                            "Yield Line (True)",
-                            "Yield Point (True)",
-                            "Yield Line (0.2%)",
-                            "Yield Point (0.2%)",
-                            "UTS Point"]
+                            "Control"]
+                            #"Temperature (CH1)",
+                            #"Temperature (CH2)",
+                            #"Temperature (CH3)",
+                            #"Temperature (CH4)",
+                            #"Yield Line (True)",
+                            #"Yield Point (True)",
+                            #"Yield Line (0.2%)",
+                            #"Yield Point (0.2%)",
+                            #"UTS Point"]
         elif method=="Tensile":
             plot_options = ["Force",
                             "Stress",
@@ -1789,16 +1710,16 @@ class GUI:
                             'Strain',
                             "Time",
                             "Setpoint",
-                            "Control",
-                            "Temperature (CH1)",
-                            "Temperature (CH2)",
-                            "Temperature (CH3)",
-                            "Temperature (CH4)",
-                            "Yield Line (True)",
-                            "Yield Point (True)",
-                            "Yield Line (0.2%)",
-                            "Yield Point (0.2%)",
-                            "UTS Point"]
+                            "Control"]
+                            #"Temperature (CH1)",
+                            #"Temperature (CH2)",
+                            #"Temperature (CH3)",
+                            #"Temperature (CH4)",
+                            #"Yield Line (True)",
+                            #"Yield Point (True)",
+                            #"Yield Line (0.2%)",
+                            #"Yield Point (0.2%)",
+                            #"UTS Point"]
         elif method=="Creep":
             pass
         elif method=="Fatigue":
@@ -2311,3 +2232,7 @@ if __name__=="__main__":
     app.root.protocol("WM_DELETE_WINDOW",app.exit_program)
     app.root.mainloop()
     
+def main():
+    app = GUI()
+    app.root.protocol("WM_DELETE_WINDOW",app.exit_program)
+    app.root.mainloop()

@@ -5,9 +5,6 @@ import os
 class solver():
 
     def __init__(self,path,log_callback,base_dir):
-        '''
-        DEFINITIONS:
-        '''
         self.log = log_callback # define callback attribute
         # ===== Read Data =====
         file_ext = os.path.splitext(path)[1].lower()
@@ -78,11 +75,6 @@ class solver():
 
         return area
 
-    def calculate_elastic_deformation(self,elastic_modulus,max_load):
-        specimen_elastic_deformation_slope = 6.49212*(10**-6)#7.06414*(10**-6) # specimen displacement as a function of load P04(5) - modeled in abaqus - VERIFIED 8/6/25 ITS CORRECT
-        #update later to use FEA - REPLACES calculate_dl
-        return specimen_elastic_deformation_slope
-
     def calculate_dL(self,
                      thickness,
                      g_width,
@@ -92,27 +84,7 @@ class solver():
                      gauge_length,
                      hole2mark_initial,
                      hole2mark_final):
-        '''
-        num_points: number of intervals used in riemann sum for each section
-        thicknesss: specimen thickness in inches
-        g_width: gauge section width in inches
-        t_width: tab width in inches
-        E: Measured elastic modulus in psi
-        final_length_UTS: LVDT displacement at UTS load
-        gauge_length: measured gauge length of marked area
-        hole2mark_initial: initial gauge mark distance to center of pin-hole average between both sides
-        hole2mark_final: final gauge mark distance to center of pin-hole average between both sides
-        '''
 
-        '''Note: Two methods of calculation can be achieved.
-            1: Integration and evaluation at boundaries
-            2: Riemann sum
-
-            calculation uses an adjusted form of hooke's law to solve for elastic displacement:
-            U = (FL/AE)
-
-            Note: ALL CALCULATIONS ARE DONE ASSUMING HALF SYMMETRY
-        '''
         # ===== Riemann Sum Calculation =====
         idx = np.argmax(self.force) # find UTS index
         UTS_displacement = self.displacement[idx] # pin-to-pin displacement at UTS
@@ -160,29 +132,7 @@ class solver():
         print(f"total elastic deformation {U_E_TTL}")
         #U_E_TTL = (U_PH_E_TTL+U_TB_E_TTL+U_RD_E_TTL) # total elastic deformation from all four sections minus the gauge
         U_G_TTL = specimen_displacement-(2*(U_E_TTL+U_4_2_P_TTL)) # total specimen displacement @ UTS minus plastic deformation outside gauge minus total elastic deformation
-        '''
-
-
-        NOTE***
-        Elastic calculations are off by a small amount - ex: for P04(5)_LE7 total elastic deformation was calculated to be .0138", abaqus reported .0155"
-        - Update later to use FEA to calculate elastic deformation
-        
-
-
-        '''
-        #print(f"Specimen Displacement @ UTS = {specimen_displacement}")
 
         # ===== Calculations/Results =====
         UTS_strain = U_G_TTL/gauge_length # calculate strain at UTS using initial gauge marking length
-        #print(f"Elastic Pin-Hole deformation = {2*U_PH_E_TTL:.4f}")
-        #print(f"Elastic Tab deformation = {2*U_TB_E_TTL:.4f}")
-        #print(f"Elastic Radial deformation = {2*U_RD_E_TTL:.4f}")
-        #print(f"Elast Gauge deformation = {2*U_G_E_TTL:.4f}")
-        # print(f"Plastic deformation Section 4-2 = {2*U_4_2_P_TTL:.4f}")
-        # print(f"Total gauge deformation = {U_G_TTL:.4f}")
-        # print(f"Total elastic deformation = {2*U_E_TTL:.4f}")
-        # print(f"Strain at UTS = {UTS_strain*100:.2f}%")
         return UTS_strain
-    
-#test = solver(path="P04(5)_LE7.txt",log_callback=None,base_dir=None)
-#test.calculate_dL(thickness=.125,g_width=.125,t_width=.656,D1=.1875,E=17119000,gauge_length=.5625,hole2mark_initial=1.1282,hole2mark_final=1.21935)
