@@ -175,7 +175,7 @@ class DAC():
             line = np.polyfit([0,98],[0,10],1) # equation of a line given the points: x (3,98) y (0,10) 
             voltage = ((line[0]*calibrated_psi)-line[1]) # calibrated voltage
         except AttributeError: # except if no calibration exists
-            voltage = ((line[0]*psi)-line[1]) # eq. of line given (0v, 3psi) & (10v, 98psi)
+            voltage = (10/98)*psi
         self.writeVoltage(voltage)
         if callback==False:
             pass
