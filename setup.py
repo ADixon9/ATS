@@ -33,8 +33,8 @@ setup(
     ],
     entry_points={
         'consol_scripts':[
-            'ats = ats_suite.gui:main',
-            'ATS = ats_suite.gui:main'
+            'ats=ats_suite.gui:main',
+            'ATS=ats_suite.gui:main'
         ]
     },
     classifiers=[
